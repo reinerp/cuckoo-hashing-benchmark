@@ -6,6 +6,8 @@ use std::{hint::black_box, time::Instant};
 mod control;
 mod quadratic_probing_table;
 mod aligned_quadratic_probing_table;
+mod aligned_cuckoo_table;
+mod unaligned_cuckoo_table;
 mod u64_fold_hash_fast;
 mod uunwrap;
 
@@ -18,7 +20,7 @@ macro_rules! benchmark_find_miss {
                 let key = rng.u64(..);
                 table.insert(key, <$v>::default());
             }
-            const ITERS: usize = 100_000_000;
+            const ITERS: usize = 1000_000_000;
             let start = Instant::now();
             let mut found = 0;
             for _ in 0..ITERS {
@@ -41,7 +43,7 @@ macro_rules! benchmark_find_hit {
                 let key = rng.u64(..);
                 table.insert(key, <$v>::default());
             }
-            const APPROX_ITERS: usize = 100_000_000;
+            const APPROX_ITERS: usize = 1000_000_000;
             let outer_iters = APPROX_ITERS / n;
             let true_iters = outer_iters * n;
             let start = Instant::now();
@@ -62,12 +64,18 @@ macro_rules! benchmark_find_hit {
 
 fn main() {
     let mi = 1 << 20;
-    for n in [mi * 4 / 8, mi * 5 / 8, mi * 6 / 8, mi * 7 / 8, mi] {
+    for load_factor in [4, 5, 6, 7] {
+        println!("load factor: {}/8", load_factor);
+        let n = mi * load_factor / 8;
         benchmark_find_miss!(quadratic_probing_table::HashTable::<u64>, u64)(n);
         benchmark_find_miss!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n);
+        benchmark_find_miss!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n);
+        benchmark_find_miss!(aligned_cuckoo_table::HashTable::<u64>, u64)(n);
         benchmark_find_miss!(hashbrown::HashMap::<u64, u64>, u64)(n);
         benchmark_find_hit!(quadratic_probing_table::HashTable::<u64>, u64)(n);
         benchmark_find_hit!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n);
+        benchmark_find_hit!(aligned_cuckoo_table::HashTable::<u64>, u64)(n);
+        benchmark_find_hit!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n);
         benchmark_find_hit!(hashbrown::HashMap::<u64, u64>, u64)(n);
     }
 }
