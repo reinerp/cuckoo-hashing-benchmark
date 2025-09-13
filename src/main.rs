@@ -5,10 +5,11 @@ use std::{hint::black_box, time::Instant};
 
 mod control;
 mod quadratic_probing_table;
+mod aligned_quadratic_probing_table;
 mod u64_fold_hash_fast;
 mod uunwrap;
 
-macro_rules! benchmark_find {
+macro_rules! benchmark_find_miss {
     ($table:ty, $v:ty) => {
         (|n: usize| {
             let mut table = <$table>::with_capacity(n);
@@ -17,8 +18,8 @@ macro_rules! benchmark_find {
                 let key = rng.u64(..);
                 table.insert(key, <$v>::default());
             }
+            const ITERS: usize = 100_000_000;
             let start = Instant::now();
-            const ITERS: usize = 1000_000_000;
             let mut found = 0;
             for _ in 0..ITERS {
                 let key = rng.u64(..);
@@ -26,12 +27,47 @@ macro_rules! benchmark_find {
             }
             black_box(found);
             let duration = start.elapsed();
-            println!("{}/{n}: {:.2} ns/op", stringify!($table), duration.as_nanos() as f64 / ITERS as f64);
+            println!("find_miss {}/{n}: {:.2} ns/op", stringify!($table), duration.as_nanos() as f64 / ITERS as f64);
+        })
+    }
+}
+
+macro_rules! benchmark_find_hit {
+    ($table:ty, $v:ty) => {
+        (|n: usize| {
+            let mut table = <$table>::with_capacity(n);
+            let mut rng = fastrand::Rng::with_seed(123);
+            for _ in 0..n {
+                let key = rng.u64(..);
+                table.insert(key, <$v>::default());
+            }
+            const APPROX_ITERS: usize = 100_000_000;
+            let outer_iters = APPROX_ITERS / n;
+            let true_iters = outer_iters * n;
+            let start = Instant::now();
+            let mut found = 0;
+            for _ in 0..outer_iters {
+                let mut rng = fastrand::Rng::with_seed(123);
+                for _ in 0..n {
+                    let key = rng.u64(..);
+                    found += table.get(&key).is_some() as usize;
+                }
+            }
+            black_box(found);
+            let duration = start.elapsed();
+            println!("find_hit  {}/{n}: {:.2} ns/op", stringify!($table), duration.as_nanos() as f64 / true_iters as f64);
         })
     }
 }
 
 fn main() {
-    benchmark_find!(quadratic_probing_table::HashTable::<u64>, u64)(1_000_000);
-    benchmark_find!(hashbrown::HashMap::<u64, u64>, u64)(1_000_000);
+    let mi = 1 << 20;
+    for n in [mi * 4 / 8, mi * 5 / 8, mi * 6 / 8, mi * 7 / 8, mi] {
+        benchmark_find_miss!(quadratic_probing_table::HashTable::<u64>, u64)(n);
+        benchmark_find_miss!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n);
+        benchmark_find_miss!(hashbrown::HashMap::<u64, u64>, u64)(n);
+        benchmark_find_hit!(quadratic_probing_table::HashTable::<u64>, u64)(n);
+        benchmark_find_hit!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n);
+        benchmark_find_hit!(hashbrown::HashMap::<u64, u64>, u64)(n);
+    }
 }
