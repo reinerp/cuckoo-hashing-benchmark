@@ -11,6 +11,9 @@ mod balancing_cuckoo_table;
 mod unaligned_cuckoo_table;
 mod u64_fold_hash_fast;
 mod uunwrap;
+mod scalar_cache_line_aligned_table;
+mod scalar_unaligned_table;
+mod scalar_cuckoo_table;
 
 const ITERS: usize = 100_000_000;
 
@@ -82,7 +85,11 @@ fn main() {
         }
         benchmark_find_miss!(aligned_cuckoo_table::HashTable::<u64>, u64)(n);
         benchmark_find_miss!(balancing_cuckoo_table::HashTable::<u64>, u64)(n);
+        benchmark_find_miss!(scalar_cache_line_aligned_table::U64HashSet::<u64>, u64)(n);
+        benchmark_find_miss!(scalar_unaligned_table::U64HashSet::<u64>, u64)(n);
+        benchmark_find_miss!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n);
         benchmark_find_miss!(hashbrown::HashMap::<u64, u64>, u64)(n);
+
         benchmark_find_hit!(quadratic_probing_table::HashTable::<u64>, u64)(n);
         benchmark_find_hit!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n);
         benchmark_find_hit!(aligned_cuckoo_table::HashTable::<u64>, u64)(n);
@@ -90,6 +97,9 @@ fn main() {
         if load_factor < 7 {
             benchmark_find_hit!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n);
         }
+        benchmark_find_hit!(scalar_cache_line_aligned_table::U64HashSet::<u64>, u64)(n);
+        benchmark_find_hit!(scalar_unaligned_table::U64HashSet::<u64>, u64)(n);
+        benchmark_find_hit!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n);
         benchmark_find_hit!(hashbrown::HashMap::<u64, u64>, u64)(n);
     }
 }
