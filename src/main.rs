@@ -17,12 +17,23 @@ mod scalar_unaligned_table;
 mod scalar_cuckoo_table;
 
 const ITERS: usize = 100_000_000;
+const TRACK_PROBE_LENGTH: bool = false;
 
-trait HashTableExt {
+trait PrintStats {
     fn print_stats(&self) {}
 }
 
-impl HashTableExt for hashbrown::HashMap<u64, u64> {}
+impl PrintStats for hashbrown::HashMap<u64, u64> {}
+
+trait InsertAndErase {
+    fn insert_and_erase(&mut self, key: u64, value: u64) {}
+}
+
+impl InsertAndErase for hashbrown::HashMap<u64, u64> {
+    fn insert_and_erase(&mut self, key: u64, value: u64) {
+        self.entry(key).insert(value).remove();
+    }
+}
 
 fn drop_spaces(s: &str) -> String {
     s.split_whitespace().collect()
@@ -46,7 +57,9 @@ macro_rules! benchmark_find_miss {
             black_box(found);
             let duration = start.elapsed();
             println!("find_miss {}/{n}: {:.2} ns/op", drop_spaces(stringify!($table)), duration.as_nanos() as f64 / ITERS as f64);
-            table.print_stats();
+            if TRACK_PROBE_LENGTH {
+                table.print_stats();
+            }
         })
     }
 }
@@ -106,12 +119,36 @@ macro_rules! benchmark_find_latency {
     }
 }
 
+macro_rules! benchmark_insert_and_erase {
+    ($table:ty, $v:ty) => {
+        (|n: usize| {
+            let mut table = <$table>::with_capacity(n);
+            let mut rng = fastrand::Rng::with_seed(123);
+            for _ in 0..n {
+                let key = rng.u64(..);
+                table.insert(key, <$v>::default());
+            }
+            let outer_iters = ITERS / n;
+            let true_iters = outer_iters * n;
+            let start = Instant::now();
+            for _ in 0..outer_iters {
+                let mut rng = fastrand::Rng::with_seed(456);
+                for _ in 0..n {
+                    let key = rng.u64(..);
+                    unsafe { table.insert_and_erase(key, <$v>::default()) };
+                }
+            }
+            let duration = start.elapsed();
+            println!("insert_erase  {}/{n}: {:.2} ns/op", drop_spaces(stringify!($table)), duration.as_nanos() as f64 / true_iters as f64);
+        })
+    }
+}
+
 fn main() {
     let mi = 1 << 20;
     for load_factor in [4, 5, 6, 7] {
         println!("load factor: {}/8", load_factor);
         let n = mi * load_factor / 8;
-
         macro_rules! benchmark_all {
             ($benchmark:ident) => {
                 $benchmark!(aligned_double_hashing_table::HashTable::<u64>, u64)(n);
@@ -132,5 +169,6 @@ fn main() {
         benchmark_all!(benchmark_find_miss);
         benchmark_all!(benchmark_find_hit);
         benchmark_all!(benchmark_find_latency);
+        benchmark_all!(benchmark_insert_and_erase);
     }
 }

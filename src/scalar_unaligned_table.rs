@@ -7,6 +7,7 @@
 
 use std::mem::MaybeUninit;
 
+use crate::TRACK_PROBE_LENGTH;
 use crate::u64_fold_hash_fast::fold_hash_fast;
 
 pub struct U64HashSet<V: Copy> {
@@ -62,18 +63,35 @@ impl<V: Copy> U64HashSet<V> {
         let mut probe_length = 1;
         loop {
             // Safety: bucket_mask is correct because the number of buckets is a power of 2.
-            let element = unsafe { self.table.get_unchecked_mut(bucket_i & bucket_mask) };
+            let bucket_pos = bucket_i & bucket_mask;
+            let element = unsafe { self.table.get_unchecked_mut(bucket_pos) };
             if element.0 == 0 {
                 element.0 = key;
                 self.len += 1;
-                self.total_probe_length += probe_length;
-                return (true, bucket_i);
+                if TRACK_PROBE_LENGTH {
+                    self.total_probe_length += probe_length;
+                }
+                return (true, bucket_pos);
             }
             if element.0 == key {
-                return (false, bucket_i);
+                return (false, bucket_pos);
             }
             probe_length += 1;
             bucket_i += 1;
+        }
+    }
+
+    #[inline(always)]
+    pub unsafe fn insert_and_erase(&mut self, key: u64, value: V) {
+        let (inserted, bucket_pos) = self.insert(key, value);
+        if inserted {
+            if key == 0 {
+                self.zero_value = None;
+            } else {
+                unsafe {
+                    self.table.get_unchecked_mut(bucket_pos).0 = 0;
+                }
+            }
         }
     }
 

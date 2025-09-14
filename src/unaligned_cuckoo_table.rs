@@ -7,9 +7,17 @@
 //! 
 //! Unfortunately, both of those algorithms require adding a few bits to the metadata table, which
 //! we don't want to do, since we want to maintain compatibility with SwissTable layout.
+//! 
+//! https://www.cs.cmu.edu/~dga/papers/memc3-nsdi2013.pdf <-- this paper uses hash(key)^hash(tag) as
+//! the secondary key.
+//! 
+//! https://news.ycombinator.com/item?id=14290055 <-- some discussion from Frank McSherry and Paul Khuong on hash tables.
+//! 
+//! https://www.cs.princeton.edu/~mfreed/docs/cuckoo-eurosys14.pdf <-- follow-up on libcuckoo/MemC3. They explain why they use BFS rather than DFS. Some is irrelevant (critical section length) but some is relevant: BFS offers better memory level parallelism via prefetching.
 
 use std::{alloc::Layout, ptr::NonNull};
 
+use crate::TRACK_PROBE_LENGTH;
 use crate::control::{Group, Tag, TagSliceExt as _};
 use crate::u64_fold_hash_fast::{self, fold_hash_fast};
 use crate::uunwrap::UUnwrap;
@@ -82,7 +90,7 @@ impl<V> HashTable<V> {
     }
 
     #[inline(always)]
-    pub fn insert(&mut self, key: u64, value: V) -> bool {
+    pub fn insert(&mut self, key: u64, value: V) -> (bool, usize) {
         let hash0 = fold_hash_fast(key, self.seed);
         let hash1 = hash0.rotate_left(32);
         let tag_hash = Tag::full(hash0);
@@ -98,7 +106,7 @@ impl<V> HashTable<V> {
 
             if unsafe { (*bucket).0 } == key {
                 unsafe { (*bucket).1 = value };
-                return false;
+                return (false, index);
             }
         }
 
@@ -113,7 +121,7 @@ impl<V> HashTable<V> {
 
             if unsafe { (*bucket).0 } == key {
                 unsafe { (*bucket).1 = value };
-                return false;
+                return (false, index);
             }
         }
 
@@ -126,15 +134,19 @@ impl<V> HashTable<V> {
                 self.set_ctrl(insert_slot, tag_hash);
                 self.bucket(insert_slot).write((key, value));
                 self.items += 1;
-                self.total_probe_length += 1;
-                self.total_insert_probe_length += insert_probe_length;
-                self.max_insert_probe_length = self.max_insert_probe_length.max(insert_probe_length);
-                return true;
+                if TRACK_PROBE_LENGTH {
+                    self.total_probe_length += 1;
+                    self.total_insert_probe_length += insert_probe_length;
+                    self.max_insert_probe_length = self.max_insert_probe_length.max(insert_probe_length);
+                }
+                return (true, insert_slot);
             }
         }
 
         // key is going to get inserted in the second location.
-        self.total_probe_length += 2;
+        if TRACK_PROBE_LENGTH {
+            self.total_probe_length += 2;
+        }
 
         // Cuckoo loop. Loop entry invariant: (key, value, hash) has no space in prev_group and should be tried in group `hash`.
         let mut key = key;
@@ -151,9 +163,11 @@ impl<V> HashTable<V> {
                     self.bucket(insert_slot).write((key, value));
                     self.items += 1;
                     insert_probe_length += 1;
-                    self.total_insert_probe_length += insert_probe_length;
-                    self.max_insert_probe_length = self.max_insert_probe_length.max(insert_probe_length);
-                    return true;
+                    if TRACK_PROBE_LENGTH {
+                        self.total_insert_probe_length += insert_probe_length;
+                        self.max_insert_probe_length = self.max_insert_probe_length.max(insert_probe_length);
+                    }
+                    return (true, insert_slot);
                 }
             }
             let evict_index = self.rng.usize(..) % Group::WIDTH;
@@ -166,10 +180,14 @@ impl<V> HashTable<V> {
             if evict_index.wrapping_sub(evicted_group_start) & self.bucket_mask < Group::WIDTH {
                 hash = hash.rotate_left(32);
                 // We evict from its first location and move to its second location.
-                self.total_probe_length += 1;
+                if TRACK_PROBE_LENGTH {
+                    self.total_probe_length += 1;
+                }
             } else {
                 // We evict from its second location and move to its first location.
-                self.total_probe_length -= 1;
+                if TRACK_PROBE_LENGTH {
+                    self.total_probe_length -= 1;
+                }
             }
             insert_probe_length += 1;
             // loop_count += 1;
@@ -180,6 +198,16 @@ impl<V> HashTable<V> {
             //     }
             // }
             // TODO: panic and rehash on loop.
+        }
+    }
+
+    #[inline(always)]
+    pub unsafe fn insert_and_erase(&mut self, key: u64, value: V) {
+        let (inserted, index) = self.insert(key, value);
+        if inserted {
+            unsafe {
+                self.set_ctrl(index, Tag::EMPTY);
+            }
         }
     }
 

@@ -7,6 +7,7 @@
 
 use std::mem::MaybeUninit;
 
+use crate::TRACK_PROBE_LENGTH;
 use crate::u64_fold_hash_fast::fold_hash_fast;
 
 pub struct U64HashSet<V: Copy> {
@@ -67,12 +68,14 @@ impl<V: Copy> U64HashSet<V> {
             let mut probe_length = 1;
             for i in 0..2 {
                 for j in 0..WINDOW_SIZE {
-                    let bucket_pos = bucket_i as usize + j;
-                    let element = unsafe { self.table.get_unchecked_mut(bucket_pos & bucket_mask) };
+                    let bucket_pos = (bucket_i as usize + j) & bucket_mask;
+                    let element = unsafe { self.table.get_unchecked_mut(bucket_pos) };
                     if element.0 == 0 {
                         element.0 = key;
                         self.len += 1;
-                        self.total_probe_length += probe_length;
+                        if TRACK_PROBE_LENGTH {
+                            self.total_probe_length += probe_length;
+                        }
                         return (true, bucket_pos);
                     }
                     if element.0 == key {
@@ -84,8 +87,13 @@ impl<V: Copy> U64HashSet<V> {
             }
 
             let rng_next = self.rng.usize(..);
-            let evict_pos = (hash64.rotate_left(32 * (rng_next % 2) as u32) as usize + ((rng_next / 2) % WINDOW_SIZE)) & bucket_mask;
-            let (new_key, new_value) = std::mem::replace(unsafe { self.table.get_unchecked_mut(evict_pos) }, (key, MaybeUninit::new(value)));
+            let evict_pos = (hash64.rotate_left(32 * (rng_next % 2) as u32) as usize
+                + ((rng_next / 2) % WINDOW_SIZE))
+                & bucket_mask;
+            let (new_key, new_value) = std::mem::replace(
+                unsafe { self.table.get_unchecked_mut(evict_pos) },
+                (key, MaybeUninit::new(value)),
+            );
             key = new_key;
             value = unsafe { new_value.assume_init() };
         }
@@ -102,11 +110,27 @@ impl<V: Copy> U64HashSet<V> {
                 let bucket_pos = (hash64 as usize + j) & bucket_mask;
                 let element = unsafe { self.table.get_unchecked_mut(bucket_pos) };
                 if element.0 == key {
-                    return Some(unsafe { self.table.get_unchecked(bucket_pos).1.assume_init_ref() });
+                    return Some(unsafe {
+                        self.table.get_unchecked(bucket_pos).1.assume_init_ref()
+                    });
                 }
             }
             hash64 = hash64.rotate_left(32);
         }
         None
+    }
+
+    #[inline(always)]
+    pub fn insert_and_erase(&mut self, key: u64, value: V) {
+        let (inserted, index) = self.insert(key, value);
+        if inserted {
+            if key == 0 {
+                self.zero_value = None;
+            } else {
+                unsafe {
+                    self.table.get_unchecked_mut(index).0 = 0;
+                }
+            }
+        }
     }
 }

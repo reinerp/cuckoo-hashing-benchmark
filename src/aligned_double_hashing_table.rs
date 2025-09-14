@@ -6,6 +6,7 @@ use std::{alloc::Layout, ptr::NonNull};
 use crate::control::{Group, Tag, TagSliceExt as _};
 use crate::u64_fold_hash_fast::fold_hash_fast;
 use crate::uunwrap::UUnwrap;
+use crate::TRACK_PROBE_LENGTH;
 
 pub struct HashTable<V> {
     // Mask to get an index from a hash value. The value is one less than the
@@ -58,8 +59,6 @@ impl ProbeSeq {
     }
 }
 
-
-
 impl<V> HashTable<V> {
     pub fn with_capacity(capacity: usize) -> Self {
         // Calculate sizes
@@ -74,7 +73,8 @@ impl<V> HashTable<V> {
         let alloc = unsafe { std::alloc::alloc(layout) };
         // Write control
         let ctrl = unsafe { NonNull::new_unchecked(alloc.add(ctrl_offset)) };
-        let ctrl_slice = unsafe { std::slice::from_raw_parts_mut(ctrl.as_ptr() as *mut Tag, num_buckets) };
+        let ctrl_slice =
+            unsafe { std::slice::from_raw_parts_mut(ctrl.as_ptr() as *mut Tag, num_buckets) };
         ctrl_slice.fill_empty();
         // dbg!(num_buckets, bucket_size, align, ctrl_offset, size, layout, alloc, ctrl);
         let seed = fastrand::Rng::with_seed(123).u64(..);
@@ -93,7 +93,10 @@ impl<V> HashTable<V> {
     }
 
     pub fn print_stats(&self) {
-        println!("  avg_probe_length: {}", self.total_probe_length as f64 / self.items as f64);
+        println!(
+            "  avg_probe_length: {}",
+            self.total_probe_length as f64 / self.items as f64
+        );
     }
 
     #[inline(always)]
@@ -102,7 +105,7 @@ impl<V> HashTable<V> {
     }
 
     #[inline(always)]
-    pub fn insert(&mut self, key: u64, value: V) -> bool {
+    pub fn insert(&mut self, key: u64, value: V) -> (bool, usize) {
         let mut insert_slot = None;
         let hash64 = fold_hash_fast(key, self.seed);
         let tag_hash = Tag::full(hash64);
@@ -111,7 +114,9 @@ impl<V> HashTable<V> {
 
         loop {
             let group = unsafe { Group::load(self.ctrl(probe_seq.pos)) };
-            self.total_probe_length += 1;
+            if TRACK_PROBE_LENGTH {
+                self.total_probe_length += 1;
+            }
 
             for bit in group.match_tag(tag_hash) {
                 let index = (probe_seq.pos + bit) & self.bucket_mask;
@@ -120,27 +125,27 @@ impl<V> HashTable<V> {
 
                 if unsafe { (*bucket).0 } == key {
                     unsafe { (*bucket).1 = value };
-                    return false;
+                    return (false, index);
                 }
             }
 
             if insert_slot.is_none() {
-                insert_slot = group.match_empty_or_deleted().lowest_set_bit().map(|bit| {
-                    probe_seq.pos + bit
-                });
+                insert_slot = group
+                    .match_empty_or_deleted()
+                    .lowest_set_bit()
+                    .map(|bit| probe_seq.pos + bit);
             }
-
 
             if let Some(insert_slot) = insert_slot {
                 if group.match_empty().any_bit_set() {
                     let insert_slot = insert_slot & self.bucket_mask;
-                    unsafe { 
+                    unsafe {
                         // The first Group::WIDTH control slots are replicated as the last Group::WIDTH control slots. We
                         // write to both.
                         self.set_ctrl(insert_slot, tag_hash);
                         self.bucket(insert_slot).write((key, value));
                         self.items += 1;
-                        return true;
+                        return (true, insert_slot);
                     }
                 }
             }
@@ -178,6 +183,16 @@ impl<V> HashTable<V> {
     }
 
     #[inline(always)]
+    pub unsafe fn insert_and_erase(&mut self, key: u64, value: V) {
+        let (inserted, index) = self.insert(key, value);
+        if inserted {
+            unsafe {
+                self.set_ctrl(index, Tag::EMPTY);
+            }
+        }
+    }
+
+    #[inline(always)]
     pub unsafe fn erase_index(&mut self, index: usize) {
         let index_before = index.wrapping_sub(Group::WIDTH) & self.bucket_mask;
         let empty_before = Group::load(self.ctrl(index_before)).match_empty();
@@ -189,7 +204,6 @@ impl<V> HashTable<V> {
         };
         self.set_ctrl(index, ctrl);
         self.items -= 1;
-
     }
 
     #[inline(always)]

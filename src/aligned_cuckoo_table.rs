@@ -3,6 +3,7 @@
 use std::hint::{black_box, likely};
 use std::{alloc::Layout, ptr::NonNull};
 
+use crate::TRACK_PROBE_LENGTH;
 use crate::control::{Group, Tag, TagSliceExt as _};
 use crate::u64_fold_hash_fast::{self, fold_hash_fast};
 use crate::uunwrap::UUnwrap;
@@ -29,7 +30,7 @@ pub struct HashTable<V> {
 
     total_probe_length: usize,
     total_insert_probe_length: usize,
-    max_insert_probe_length: usize,     
+    max_insert_probe_length: usize,
 }
 
 impl<V> HashTable<V> {
@@ -46,7 +47,8 @@ impl<V> HashTable<V> {
         let alloc = unsafe { std::alloc::alloc(layout) };
         // Write control
         let ctrl = unsafe { NonNull::new_unchecked(alloc.add(ctrl_offset)) };
-        let ctrl_slice = unsafe { std::slice::from_raw_parts_mut(ctrl.as_ptr() as *mut Tag, num_buckets) };
+        let ctrl_slice =
+            unsafe { std::slice::from_raw_parts_mut(ctrl.as_ptr() as *mut Tag, num_buckets) };
         ctrl_slice.fill_empty();
         // dbg!(num_buckets, bucket_size, align, ctrl_offset, size, layout, alloc, ctrl);
         let seed = fastrand::Rng::with_seed(123).u64(..);
@@ -67,15 +69,36 @@ impl<V> HashTable<V> {
         }
     }
 
+    /// Safety: caller promises that there have been no tombstones in the table.
+    #[inline(always)]
+    pub unsafe fn insert_and_erase(&mut self, key: u64, value: V) {
+        let (inserted, index) = self.insert(key, value);
+        if inserted {
+            unsafe {
+                self.set_ctrl(index, Tag::EMPTY);
+            }
+        }
+    }
+
+    #[inline(always)]
     pub fn avg_probe_length(&self) -> f64 {
         self.total_probe_length as f64 / self.items as f64
     }
 
     pub fn print_stats(&self) {
         let items = self.items as f64;
-        println!("  avg_probe_length: {}", self.total_probe_length as f64 / items);
-        println!("  avg_insert_probe_length: {}", self.total_insert_probe_length as f64 / items);
-        println!("  max_insert_probe_length: {}", self.max_insert_probe_length);
+        println!(
+            "  avg_probe_length: {}",
+            self.total_probe_length as f64 / items
+        );
+        println!(
+            "  avg_insert_probe_length: {}",
+            self.total_insert_probe_length as f64 / items
+        );
+        println!(
+            "  max_insert_probe_length: {}",
+            self.max_insert_probe_length
+        );
     }
 
     #[inline(always)]
@@ -84,7 +107,7 @@ impl<V> HashTable<V> {
     }
 
     #[inline(always)]
-    pub fn insert(&mut self, key: u64, value: V) -> bool {
+    pub fn insert(&mut self, key: u64, value: V) -> (bool, usize) {
         let hash0 = fold_hash_fast(key, self.seed);
         let hash1 = hash0.rotate_left(32);
         let tag_hash = Tag::full(hash0);
@@ -100,7 +123,7 @@ impl<V> HashTable<V> {
 
             if unsafe { (*bucket).0 } == key {
                 unsafe { (*bucket).1 = value };
-                return false;
+                return (false, index);
             }
         }
 
@@ -115,7 +138,7 @@ impl<V> HashTable<V> {
 
             if unsafe { (*bucket).0 } == key {
                 unsafe { (*bucket).1 = value };
-                return false;
+                return (false, index);
             }
         }
 
@@ -123,20 +146,24 @@ impl<V> HashTable<V> {
         let mut insert_probe_length = 1;
         if let Some(insert_slot) = group0.match_empty().lowest_set_bit() {
             let insert_slot = (pos0 + insert_slot) & self.bucket_mask;
-            unsafe { 
+            unsafe {
                 self.set_ctrl(insert_slot, tag_hash);
                 self.bucket(insert_slot).write((key, value));
                 self.items += 1;
-                self.total_probe_length += 1;
-                self.total_insert_probe_length += insert_probe_length;
-                self.max_insert_probe_length = self.max_insert_probe_length.max(insert_probe_length);
-                return true;
+                if TRACK_PROBE_LENGTH {
+                    self.total_probe_length += 1;
+                    self.total_insert_probe_length += insert_probe_length;
+                    self.max_insert_probe_length =
+                        self.max_insert_probe_length.max(insert_probe_length);
+                }
+                return (true, insert_slot);
             }
         }
 
         // key is going to get inserted in the second location.
-        self.total_probe_length += 2;
-
+        if TRACK_PROBE_LENGTH {
+            self.total_probe_length += 2;
+        }
 
         // Cuckoo loop. Loop entry invariant: (key, value, hash) has no space in prev_group and should be tried in group `hash`.
         let mut key = key;
@@ -148,27 +175,37 @@ impl<V> HashTable<V> {
             let group = unsafe { Group::load(self.ctrl(pos)) };
             if let Some(insert_slot) = group.match_empty().lowest_set_bit() {
                 let insert_slot = (pos + insert_slot) & self.bucket_mask;
-                unsafe { 
+                unsafe {
                     self.set_ctrl(insert_slot, tag_hash);
                     self.bucket(insert_slot).write((key, value));
                     self.items += 1;
-                    insert_probe_length += 1;
-                    self.total_insert_probe_length += insert_probe_length;
-                    self.max_insert_probe_length = self.max_insert_probe_length.max(insert_probe_length);
-                    return true;
+                    if TRACK_PROBE_LENGTH {
+                        insert_probe_length += 1;
+                        self.total_insert_probe_length += insert_probe_length;
+                        self.max_insert_probe_length =
+                            self.max_insert_probe_length.max(insert_probe_length);
+                    }
+                    return (true, insert_slot);
                 }
             }
             let evict_index = self.rng.usize(..) % Group::WIDTH;
-            (key, value) = std::mem::replace(unsafe { &mut *self.bucket(pos + evict_index) }, (key, value));
+            (key, value) = std::mem::replace(
+                unsafe { &mut *self.bucket(pos + evict_index) },
+                (key, value),
+            );
             tag_hash = std::mem::replace(unsafe { &mut *self.ctrl(pos + evict_index) }, tag_hash);
             hash = fold_hash_fast(key, self.seed);
             if hash as usize & self.aligned_bucket_mask == pos {
                 // We evict from its first location and move to its second location.
-                self.total_probe_length += 1;
+                if TRACK_PROBE_LENGTH {
+                    self.total_probe_length += 1;
+                }
                 hash = hash.rotate_left(32);
             } else {
                 // We evict from its second location and move to its first location.
-                self.total_probe_length -= 1;
+                if TRACK_PROBE_LENGTH {
+                    self.total_probe_length -= 1;
+                }
             }
             insert_probe_length += 1;
             // TODO: panic and rehash on loop.
@@ -205,7 +242,8 @@ impl<V> HashTable<V> {
             // by doing "less-loaded" cuckoo insertions. We don't do that in this table but instead in
             // a later one.
             const ALLOW_EARLY_RETURN: bool = false;
-            if (ALLOW_EARLY_RETURN && likely(group.match_empty().any_bit_set())) || is_second_group {
+            if (ALLOW_EARLY_RETURN && likely(group.match_empty().any_bit_set())) || is_second_group
+            {
                 return None;
             }
             hash64 = hash64.rotate_left(32);
@@ -225,7 +263,6 @@ impl<V> HashTable<V> {
         };
         self.set_ctrl(index, ctrl);
         self.items -= 1;
-
     }
 
     #[inline(always)]

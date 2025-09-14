@@ -7,6 +7,7 @@
 
 use std::mem::MaybeUninit;
 
+use crate::TRACK_PROBE_LENGTH;
 use crate::u64_fold_hash_fast::fold_hash_fast;
 
 pub struct U64HashSet<V: Copy> {
@@ -32,7 +33,7 @@ impl<V: Copy> U64HashSet<V> {
     #[inline(always)]
     pub fn with_capacity(capacity: usize) -> Self {
         // TODO: integer overflow...
-        let num_buckets = ((capacity * 8) / 7).next_power_of_two().div_ceil(BUCKET_SIZE) * 2;
+        let num_buckets = ((capacity * 8) / 7).next_power_of_two().div_ceil(BUCKET_SIZE);
         let table = vec![Bucket([(0u64, MaybeUninit::uninit()); BUCKET_SIZE]); num_buckets].into_boxed_slice();
         let seed = fastrand::Rng::with_seed(123).u64(..);
         Self {
@@ -51,12 +52,12 @@ impl<V: Copy> U64HashSet<V> {
     }
 
     #[inline(always)]
-    pub fn insert(&mut self, key: u64, value: V) -> (bool, usize) {
+    pub fn insert(&mut self, key: u64, value: V) -> (bool, (usize, usize)) {
         if key == 0 {
             let inserted = self.zero_value.is_none();
             self.len += inserted as usize;
             self.zero_value = Some(value);
-            return (inserted, usize::MAX);
+            return (inserted, (usize::MAX, usize::MAX));
         }
         let hash64 = fold_hash_fast(key, self.seed);
         let bucket_mask = self.bucket_mask;
@@ -67,17 +68,23 @@ impl<V: Copy> U64HashSet<V> {
         let mut probe_length = 1;
         loop {
             // Safety: bucket_mask is correct because the number of buckets is a power of 2.
-            let bucket = unsafe { self.table.get_unchecked_mut(bucket_i & bucket_mask) };
+            let bucket_pos = bucket_i & bucket_mask;
+            let bucket = unsafe { self.table.get_unchecked_mut(bucket_pos) };
             for element_i in 0..BUCKET_SIZE {
-                let element = &mut bucket.0[(element_i + element_offset_in_bucket) % BUCKET_SIZE];
+                let element_pos = (element_i + element_offset_in_bucket) % BUCKET_SIZE;
+                let element = &mut bucket.0[element_pos];
                 if element.0 == 0 {
                     element.0 = key;
+                    element.1.write(value);
                     self.len += 1;
-                    self.total_probe_length += probe_length;
-                    return (true, bucket_i);
+                    if TRACK_PROBE_LENGTH {
+                        self.total_probe_length += probe_length;
+                    }
+                    return (true, (bucket_pos, element_pos));
                 }
                 if element.0 == key {
-                    return (false, bucket_i);
+                    element.1.write(value);
+                    return (false, (bucket_pos, element_pos));
                 }
                 probe_length += 1;
             }
@@ -88,6 +95,9 @@ impl<V: Copy> U64HashSet<V> {
     #[inline(always)]
     pub fn get(&mut self, key: &u64) -> Option<&V> {
         let key = *key;
+        if key == 0 {
+            return self.zero_value.as_ref();
+        }
         let hash64 = fold_hash_fast(key, self.seed);
         let bucket_mask = self.bucket_mask;
         let element_offset_in_bucket = (hash64 >> 61) as usize;
@@ -106,6 +116,20 @@ impl<V: Copy> U64HashSet<V> {
                 }
             }
             bucket_i += 1;
+        }
+    }
+
+    #[inline(always)]
+    pub unsafe fn insert_and_erase(&mut self, key: u64, value: V) {
+        let (inserted, (bucket_pos, element_pos)) = self.insert(key, value);
+        if inserted {
+            if key == 0 {
+                self.zero_value = None;
+            } else {
+                unsafe {
+                    self.table.get_unchecked_mut(bucket_pos).0.get_unchecked_mut(element_pos).0 = 0;
+                }
+            }
         }
     }
 }

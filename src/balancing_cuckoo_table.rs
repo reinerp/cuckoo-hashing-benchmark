@@ -3,6 +3,7 @@
 use std::hint::{black_box, likely};
 use std::{alloc::Layout, ptr::NonNull};
 
+use crate::TRACK_PROBE_LENGTH;
 use crate::control::{Group, Tag, TagSliceExt as _};
 use crate::u64_fold_hash_fast::{self, fold_hash_fast};
 use crate::uunwrap::UUnwrap;
@@ -84,7 +85,7 @@ impl<V> HashTable<V> {
     }
 
     #[inline(always)]
-    pub fn insert(&mut self, key: u64, value: V) -> bool {
+    pub fn insert(&mut self, key: u64, value: V) -> (bool, usize) {
         let hash0 = fold_hash_fast(key, self.seed);
         let hash1 = hash0.rotate_left(32);
         let tag_hash = Tag::full(hash0);
@@ -100,7 +101,7 @@ impl<V> HashTable<V> {
 
             if unsafe { (*bucket).0 } == key {
                 unsafe { (*bucket).1 = value };
-                return false;
+                return (false, index);
             }
         }
 
@@ -115,7 +116,7 @@ impl<V> HashTable<V> {
 
             if unsafe { (*bucket).0 } == key {
                 unsafe { (*bucket).1 = value };
-                return false;
+                return (false, index);
             }
         }
 
@@ -137,15 +138,19 @@ impl<V> HashTable<V> {
                 self.set_ctrl(insert_slot, tag_hash);
                 self.bucket(insert_slot).write((key, value));
                 self.items += 1;
-                self.total_probe_length += probe_length;
-                self.total_insert_probe_length += 2;
-                self.max_insert_probe_length = self.max_insert_probe_length.max(2);
-                return true;
+                if TRACK_PROBE_LENGTH {
+                    self.total_probe_length += probe_length;
+                    self.total_insert_probe_length += 2;
+                    self.max_insert_probe_length = self.max_insert_probe_length.max(2);
+                }
+                return (true, insert_slot);
             }
         }
 
         // key is going to get inserted in the second location.
-        self.total_probe_length += 2;
+        if TRACK_PROBE_LENGTH {
+            self.total_probe_length += 2;
+        }
         let mut insert_probe_length = 1;
 
         // Cuckoo loop. Loop entry invariant: (key, value, hash) has no space in prev_group and should be tried in group `hash`.
@@ -163,9 +168,11 @@ impl<V> HashTable<V> {
                     self.bucket(insert_slot).write((key, value));
                     self.items += 1;
                     insert_probe_length += 1;
-                    self.total_insert_probe_length += insert_probe_length;
-                    self.max_insert_probe_length = self.max_insert_probe_length.max(insert_probe_length);
-                    return true;
+                    if TRACK_PROBE_LENGTH {
+                        self.total_insert_probe_length += insert_probe_length;
+                        self.max_insert_probe_length = self.max_insert_probe_length.max(insert_probe_length);
+                    }
+                    return (true, insert_slot);
                 }
             }
             let evict_index = self.rng.usize(..) % Group::WIDTH;
@@ -174,14 +181,28 @@ impl<V> HashTable<V> {
             hash = fold_hash_fast(key, self.seed);
             if hash as usize & self.aligned_bucket_mask == pos {
                 // We evict from its first location and move to its second location.
-                self.total_probe_length += 1;
+                if TRACK_PROBE_LENGTH {
+                    self.total_probe_length += 1;
+                }
                 hash = hash.rotate_left(32);
             } else {
                 // We evict from its second location and move to its first location.
-                self.total_probe_length -= 1;
+                if TRACK_PROBE_LENGTH {
+                    self.total_probe_length -= 1;
+                }
             }
             insert_probe_length += 1;
             // TODO: panic and rehash on loop.
+        }
+    }
+
+    #[inline(always)]
+    pub unsafe fn insert_and_erase(&mut self, key: u64, value: V) {
+        let (inserted, index) = self.insert(key, value);
+        if inserted {
+            unsafe {
+                self.set_ctrl(index, Tag::EMPTY);
+            }
         }
     }
 

@@ -4,6 +4,7 @@
 use std::hint::likely;
 use std::{alloc::Layout, ptr::NonNull};
 
+use crate::TRACK_PROBE_LENGTH;
 use crate::control::{Group, Tag, TagSliceExt as _};
 use crate::u64_fold_hash_fast::fold_hash_fast;
 use crate::uunwrap::UUnwrap;
@@ -98,7 +99,7 @@ impl<V> HashTable<V> {
     }
 
     #[inline(always)]
-    pub fn insert(&mut self, key: u64, value: V) -> bool {
+    pub fn insert(&mut self, key: u64, value: V) -> (bool, usize) {
         let mut insert_slot = None;
         let hash64 = fold_hash_fast(key, self.seed);
         let tag_hash = Tag::full(hash64);
@@ -115,7 +116,7 @@ impl<V> HashTable<V> {
 
                 if unsafe { (*bucket).0 } == key {
                     unsafe { (*bucket).1 = value };
-                    return false;
+                    return (false, index);
                 }
             }
 
@@ -134,8 +135,10 @@ impl<V> HashTable<V> {
                         self.set_ctrl(insert_slot, tag_hash);
                         self.bucket(insert_slot).write((key, value));
                         self.items += 1;
-                        self.total_probe_length += 1 + probe_seq.stride;
-                        return true;
+                        if TRACK_PROBE_LENGTH {
+                            self.total_probe_length += 1 + probe_seq.stride;
+                        }
+                        return (true, insert_slot);
                     }
                 }
             }
@@ -185,6 +188,16 @@ impl<V> HashTable<V> {
         self.set_ctrl(index, ctrl);
         self.items -= 1;
 
+    }
+
+    #[inline(always)]
+    pub unsafe fn insert_and_erase(&mut self, key: u64, value: V) {
+        let (inserted, index) = self.insert(key, value);
+        if inserted {
+            unsafe {
+                self.set_ctrl(index, Tag::EMPTY);
+            }
+        }
     }
 
     #[inline(always)]
