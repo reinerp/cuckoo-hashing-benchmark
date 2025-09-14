@@ -7,6 +7,7 @@ mod control;
 mod quadratic_probing_table;
 mod aligned_quadratic_probing_table;
 mod aligned_cuckoo_table;
+mod balancing_cuckoo_table;
 mod unaligned_cuckoo_table;
 mod u64_fold_hash_fast;
 mod uunwrap;
@@ -80,10 +81,12 @@ fn main() {
             benchmark_find_miss!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n);
         }
         benchmark_find_miss!(aligned_cuckoo_table::HashTable::<u64>, u64)(n);
+        benchmark_find_miss!(balancing_cuckoo_table::HashTable::<u64>, u64)(n);
         benchmark_find_miss!(hashbrown::HashMap::<u64, u64>, u64)(n);
         benchmark_find_hit!(quadratic_probing_table::HashTable::<u64>, u64)(n);
         benchmark_find_hit!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n);
         benchmark_find_hit!(aligned_cuckoo_table::HashTable::<u64>, u64)(n);
+        benchmark_find_hit!(balancing_cuckoo_table::HashTable::<u64>, u64)(n);
         if load_factor < 7 {
             benchmark_find_hit!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n);
         }

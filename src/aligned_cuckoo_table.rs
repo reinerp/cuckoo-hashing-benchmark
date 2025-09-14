@@ -1,5 +1,4 @@
-//! A quadratic probing hash table for u64 keys. SwissTable design following `hashbrown` crate,
-//! with a lot of features removed but the same optimizations valid.
+//! A cuckoo hash table with 2 choices of group, each with 8-16 buckets per group.
 
 use std::hint::{black_box, likely};
 use std::{alloc::Layout, ptr::NonNull};
