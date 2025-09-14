@@ -26,6 +26,8 @@ pub struct HashTable<V> {
 
     marker: std::marker::PhantomData<V>,
     rng: fastrand::Rng,
+
+    total_probe_length: usize,
 }
 
 impl<V> HashTable<V> {
@@ -57,7 +59,12 @@ impl<V> HashTable<V> {
             seed,
             marker: std::marker::PhantomData,
             rng: fastrand::Rng::with_seed(123),
+            total_probe_length: 0,
         }
+    }
+
+    pub fn avg_probe_length(&self) -> f64 {
+        self.total_probe_length as f64 / self.items as f64
     }
 
     #[inline(always)]
@@ -108,9 +115,14 @@ impl<V> HashTable<V> {
                 self.set_ctrl(insert_slot, tag_hash);
                 self.bucket(insert_slot).write((key, value));
                 self.items += 1;
+                self.total_probe_length += 1;
                 return true;
             }
         }
+
+        // key is going to get inserted in the second location.
+        self.total_probe_length += 2;
+
 
         // Cuckoo loop. Loop entry invariant: (key, value, hash) has no space in prev_group and should be tried in group `hash`.
         let mut key = key;
@@ -132,7 +144,12 @@ impl<V> HashTable<V> {
             (key, value) = std::mem::replace(unsafe { &mut *self.bucket(pos + evict_index) }, (key, value));
             hash = fold_hash_fast(key, self.seed);
             if hash as usize & self.aligned_bucket_mask == pos {
+                // We evict from its first location and move to its second location.
+                self.total_probe_length += 1;
                 hash = hash.rotate_left(32);
+            } else {
+                // We evict from its second location and move to its first location.
+                self.total_probe_length -= 1;
             }
             // TODO: panic and rehash on loop.
         }

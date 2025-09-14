@@ -11,6 +11,12 @@ mod unaligned_cuckoo_table;
 mod u64_fold_hash_fast;
 mod uunwrap;
 
+trait HashTableExt {
+    fn avg_probe_length(&self) -> f64 { f64::NAN }
+}
+
+impl HashTableExt for hashbrown::HashMap<u64, u64> {}
+
 macro_rules! benchmark_find_miss {
     ($table:ty, $v:ty) => {
         (|n: usize| {
@@ -30,6 +36,7 @@ macro_rules! benchmark_find_miss {
             black_box(found);
             let duration = start.elapsed();
             println!("find_miss {}/{n}: {:.2} ns/op", stringify!($table), duration.as_nanos() as f64 / ITERS as f64);
+            println!("  average probe length: {:.2}", table.avg_probe_length());
         })
     }
 }

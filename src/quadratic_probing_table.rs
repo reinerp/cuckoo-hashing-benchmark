@@ -23,6 +23,7 @@ pub struct HashTable<V> {
     seed: u64,
 
     marker: std::marker::PhantomData<V>,
+    total_probe_length: usize,
 }
 
 /// Probe sequence based on triangular numbers, which is guaranteed (since our
@@ -82,12 +83,17 @@ impl<V> HashTable<V> {
             items: 0,
             seed,
             marker: std::marker::PhantomData,
+            total_probe_length: 0,
         }
     }
 
     #[inline(always)]
     pub fn len(&self) -> usize {
         self.items
+    }
+
+    pub fn avg_probe_length(&self) -> f64 {
+        self.total_probe_length as f64 / self.items as f64
     }
 
     #[inline(always)]
@@ -127,6 +133,7 @@ impl<V> HashTable<V> {
                         self.set_ctrl(insert_slot, tag_hash);
                         self.bucket(insert_slot).write((key, value));
                         self.items += 1;
+                        self.total_probe_length += 1 + probe_seq.stride;
                         return true;
                     }
                 }
