@@ -93,8 +93,8 @@ impl<V> HashTable<V> {
         }
     }
 
-    pub fn avg_probe_length(&self) -> f64 {
-        self.total_probe_length as f64 / self.items as f64
+    pub fn print_stats(&self) {
+        println!("  avg_probe_length: {}", self.total_probe_length as f64 / self.items as f64);
     }
 
     #[inline(always)]

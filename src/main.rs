@@ -1,6 +1,6 @@
 #![allow(unused)]
 #![allow(unsafe_op_in_unsafe_fn)]
-
+#![feature(likely_unlikely)]
 use std::{hint::black_box, time::Instant};
 
 mod control;
@@ -11,8 +11,10 @@ mod unaligned_cuckoo_table;
 mod u64_fold_hash_fast;
 mod uunwrap;
 
+const ITERS: usize = 100_000_000;
+
 trait HashTableExt {
-    fn avg_probe_length(&self) -> f64 { f64::NAN }
+    fn print_stats(&self) {}
 }
 
 impl HashTableExt for hashbrown::HashMap<u64, u64> {}
@@ -26,7 +28,6 @@ macro_rules! benchmark_find_miss {
                 let key = rng.u64(..);
                 table.insert(key, <$v>::default());
             }
-            const ITERS: usize = 1000_000_000;
             let start = Instant::now();
             let mut found = 0;
             for _ in 0..ITERS {
@@ -36,7 +37,7 @@ macro_rules! benchmark_find_miss {
             black_box(found);
             let duration = start.elapsed();
             println!("find_miss {}/{n}: {:.2} ns/op", stringify!($table), duration.as_nanos() as f64 / ITERS as f64);
-            println!("  average probe length: {:.2}", table.avg_probe_length());
+            table.print_stats();
         })
     }
 }
@@ -50,8 +51,7 @@ macro_rules! benchmark_find_hit {
                 let key = rng.u64(..);
                 table.insert(key, <$v>::default());
             }
-            const APPROX_ITERS: usize = 1000_000_000;
-            let outer_iters = APPROX_ITERS / n;
+            let outer_iters = ITERS / n;
             let true_iters = outer_iters * n;
             let start = Instant::now();
             let mut found = 0;
@@ -76,13 +76,17 @@ fn main() {
         let n = mi * load_factor / 8;
         benchmark_find_miss!(quadratic_probing_table::HashTable::<u64>, u64)(n);
         benchmark_find_miss!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n);
-        benchmark_find_miss!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n);
+        if load_factor < 7 {
+            benchmark_find_miss!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n);
+        }
         benchmark_find_miss!(aligned_cuckoo_table::HashTable::<u64>, u64)(n);
         benchmark_find_miss!(hashbrown::HashMap::<u64, u64>, u64)(n);
         benchmark_find_hit!(quadratic_probing_table::HashTable::<u64>, u64)(n);
         benchmark_find_hit!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n);
         benchmark_find_hit!(aligned_cuckoo_table::HashTable::<u64>, u64)(n);
-        benchmark_find_hit!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n);
+        if load_factor < 7 {
+            benchmark_find_hit!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n);
+        }
         benchmark_find_hit!(hashbrown::HashMap::<u64, u64>, u64)(n);
     }
 }

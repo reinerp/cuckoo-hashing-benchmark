@@ -1,5 +1,6 @@
-//! A quadratic probing hash table for u64 keys. SwissTable design following `hashbrown` crate,
-//! with a lot of features removed but the same optimizations valid.
+//! First-result-wins cuckoo hashing with unaligned buckets.
+//! 
+//! See https://arxiv.org/pdf/1707.06855 for analysis of unaligned buckets.
 
 use std::{alloc::Layout, ptr::NonNull};
 
@@ -25,6 +26,8 @@ pub struct HashTable<V> {
     marker: std::marker::PhantomData<V>,
     rng: fastrand::Rng,
     total_probe_length: usize,
+    total_insert_probe_length: usize,
+    max_insert_probe_length: usize,
 }
 
 impl<V> HashTable<V> {
@@ -55,11 +58,16 @@ impl<V> HashTable<V> {
             marker: std::marker::PhantomData,
             rng: fastrand::Rng::with_seed(123),
             total_probe_length: 0,
+            total_insert_probe_length: 0,
+            max_insert_probe_length: 0,
         }
     }
 
-    pub fn avg_probe_length(&self) -> f64 {
-        self.total_probe_length as f64 / self.items as f64
+    pub fn print_stats(&self) {
+        let items = self.items as f64;
+        println!("  avg_probe_length: {}", self.total_probe_length as f64 / items);
+        println!("  avg_insert_probe_length: {}", self.total_insert_probe_length as f64 / items);
+        println!("  max_insert_probe_length: {}", self.max_insert_probe_length);
     }
 
     #[inline(always)]
@@ -103,6 +111,8 @@ impl<V> HashTable<V> {
             }
         }
 
+        let mut insert_probe_length = 1;
+
         // No match. Now check first group for an empty slot.
         if let Some(insert_slot) = group0.match_empty().lowest_set_bit() {
             let insert_slot = (pos0 + insert_slot) & self.bucket_mask;
@@ -111,6 +121,8 @@ impl<V> HashTable<V> {
                 self.bucket(insert_slot).write((key, value));
                 self.items += 1;
                 self.total_probe_length += 1;
+                self.total_insert_probe_length += insert_probe_length;
+                self.max_insert_probe_length = self.max_insert_probe_length.max(insert_probe_length);
                 return true;
             }
         }
@@ -132,13 +144,18 @@ impl<V> HashTable<V> {
                     self.set_ctrl(insert_slot, tag_hash);
                     self.bucket(insert_slot).write((key, value));
                     self.items += 1;
+                    insert_probe_length += 1;
+                    self.total_insert_probe_length += insert_probe_length;
+                    self.max_insert_probe_length = self.max_insert_probe_length.max(insert_probe_length);
                     return true;
                 }
             }
             let evict_index = self.rng.usize(..) % Group::WIDTH;
             (key, value) = std::mem::replace(unsafe { &mut *self.bucket(pos + evict_index) }, (key, value));
-            tag_hash = std::mem::replace(unsafe { &mut *self.ctrl(pos + evict_index) }, tag_hash);
+            let new_tag_hash = unsafe { *self.ctrl(pos + evict_index) };
+            unsafe { self.set_ctrl(pos + evict_index, tag_hash) };
             hash = fold_hash_fast(key, self.seed);
+            tag_hash = new_tag_hash;
             let evicted_group_start = hash as usize & self.bucket_mask;
             if evict_index.wrapping_sub(evicted_group_start) & self.bucket_mask < Group::WIDTH {
                 hash = hash.rotate_left(32);
@@ -148,6 +165,14 @@ impl<V> HashTable<V> {
                 // We evict from its second location and move to its first location.
                 self.total_probe_length -= 1;
             }
+            insert_probe_length += 1;
+            // loop_count += 1;
+            // if loop_count > 1000 {
+            //     println!("Loop: key={key:x}, pos={pos:x}, hash={hash:x}");
+            //     if loop_count > 120 {
+            //         panic!();
+            //     }
+            // }
             // TODO: panic and rehash on loop.
         }
     }
@@ -155,39 +180,45 @@ impl<V> HashTable<V> {
     #[inline(always)]
     pub fn get(&mut self, key: &u64) -> Option<usize> {
         let key = *key;
-        let hash64 = fold_hash_fast(key, self.seed);
+        let mut hash64 = fold_hash_fast(key, self.seed);
         let tag_hash = Tag::full(hash64);
 
+        let mut is_second_group = false;
+
         // First group
-        let pos0 = hash64 as usize & self.bucket_mask;
-        let group0 = unsafe { Group::load(self.ctrl(pos0)) };
-        for bit in group0.match_tag(tag_hash) {
-            let index = (pos0 + bit) & self.bucket_mask;
-
-            let bucket = unsafe { self.bucket(index) };
-
-            if unsafe { (*bucket).0 } == key {
-                return Some(index);
+        loop {
+            let pos = hash64 as usize & self.bucket_mask;
+            let group = unsafe { Group::load(self.ctrl(pos)) };
+            for bit in group.match_tag(tag_hash) {
+                let index = (pos + bit) & self.bucket_mask;
+    
+                let bucket = unsafe { self.bucket(index) };
+    
+                if unsafe { (*bucket).0 } == key {
+                    return Some(index);
+                }
             }
-        }
-        // TODO(reiner): possibly skip early return here. The early return prevents deletions.
-        if group0.match_empty().any_bit_set() {
-            return None;
-        }
-
-        // Second group
-        let pos1 = hash64.rotate_left(32) as usize & self.bucket_mask;
-        let group1 = unsafe { Group::load(self.ctrl(pos1)) };
-        for bit in group1.match_tag(tag_hash) {
-            let index = (pos1 + bit) & self.bucket_mask;
-
-            let bucket = unsafe { self.bucket(index) };
-
-            if unsafe { (*bucket).0 } == key {
-                return Some(index);
+            // TODO(reiner): possibly skip early return here. The early return prevents deletions.
+            if is_second_group || group.match_empty().any_bit_set() {
+                return None;
             }
+            hash64 = hash64.rotate_left(32);
+            is_second_group = true;
         }
-        None
+
+        // // Second group
+        // let pos1 = hash64.rotate_left(32) as usize & self.bucket_mask;
+        // let group1 = unsafe { Group::load(self.ctrl(pos1)) };
+        // for bit in group1.match_tag(tag_hash) {
+        //     let index = (pos1 + bit) & self.bucket_mask;
+
+        //     let bucket = unsafe { self.bucket(index) };
+
+        //     if unsafe { (*bucket).0 } == key {
+        //         return Some(index);
+        //     }
+        // }
+        // None
     }
 
     #[inline(always)]

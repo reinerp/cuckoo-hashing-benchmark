@@ -1,6 +1,7 @@
 //! A quadratic probing hash table for u64 keys. SwissTable design following `hashbrown` crate,
 //! with a lot of features removed but the same optimizations valid.
 
+use std::hint::likely;
 use std::{alloc::Layout, ptr::NonNull};
 
 use crate::control::{Group, Tag, TagSliceExt as _};
@@ -92,8 +93,8 @@ impl<V> HashTable<V> {
         self.items
     }
 
-    pub fn avg_probe_length(&self) -> f64 {
-        self.total_probe_length as f64 / self.items as f64
+    pub fn print_stats(&self) {
+        println!("  avg_probe_length: {}", self.total_probe_length as f64 / self.items as f64);
     }
 
     #[inline(always)]
@@ -158,12 +159,12 @@ impl<V> HashTable<V> {
 
                 let bucket = unsafe { self.bucket(index) };
 
-                if unsafe { (*bucket).0 } == key {
+                if likely(unsafe { (*bucket).0 } == key) {
                     return Some(index);
                 }
             }
 
-            if group.match_empty().any_bit_set() {
+            if likely(group.match_empty().any_bit_set()) {
                 return None;
             }
 

@@ -1,6 +1,7 @@
 //! A quadratic probing hash table for u64 keys. SwissTable design following `hashbrown` crate,
 //! with a lot of features removed but the same optimizations valid.
 
+use std::hint::{black_box, likely};
 use std::{alloc::Layout, ptr::NonNull};
 
 use crate::control::{Group, Tag, TagSliceExt as _};
@@ -28,6 +29,8 @@ pub struct HashTable<V> {
     rng: fastrand::Rng,
 
     total_probe_length: usize,
+    total_insert_probe_length: usize,
+    max_insert_probe_length: usize,     
 }
 
 impl<V> HashTable<V> {
@@ -60,11 +63,20 @@ impl<V> HashTable<V> {
             marker: std::marker::PhantomData,
             rng: fastrand::Rng::with_seed(123),
             total_probe_length: 0,
+            total_insert_probe_length: 0,
+            max_insert_probe_length: 0,
         }
     }
 
     pub fn avg_probe_length(&self) -> f64 {
         self.total_probe_length as f64 / self.items as f64
+    }
+
+    pub fn print_stats(&self) {
+        let items = self.items as f64;
+        println!("  avg_probe_length: {}", self.total_probe_length as f64 / items);
+        println!("  avg_insert_probe_length: {}", self.total_insert_probe_length as f64 / items);
+        println!("  max_insert_probe_length: {}", self.max_insert_probe_length);
     }
 
     #[inline(always)]
@@ -109,6 +121,7 @@ impl<V> HashTable<V> {
         }
 
         // No match. Now check first group for an empty slot.
+        let mut insert_probe_length = 1;
         if let Some(insert_slot) = group0.match_empty().lowest_set_bit() {
             let insert_slot = (pos0 + insert_slot) & self.bucket_mask;
             unsafe { 
@@ -116,6 +129,8 @@ impl<V> HashTable<V> {
                 self.bucket(insert_slot).write((key, value));
                 self.items += 1;
                 self.total_probe_length += 1;
+                self.total_insert_probe_length += insert_probe_length;
+                self.max_insert_probe_length = self.max_insert_probe_length.max(insert_probe_length);
                 return true;
             }
         }
@@ -138,6 +153,9 @@ impl<V> HashTable<V> {
                     self.set_ctrl(insert_slot, tag_hash);
                     self.bucket(insert_slot).write((key, value));
                     self.items += 1;
+                    insert_probe_length += 1;
+                    self.total_insert_probe_length += insert_probe_length;
+                    self.max_insert_probe_length = self.max_insert_probe_length.max(insert_probe_length);
                     return true;
                 }
             }
@@ -153,6 +171,7 @@ impl<V> HashTable<V> {
                 // We evict from its second location and move to its first location.
                 self.total_probe_length -= 1;
             }
+            insert_probe_length += 1;
             // TODO: panic and rehash on loop.
         }
     }
@@ -160,39 +179,39 @@ impl<V> HashTable<V> {
     #[inline(always)]
     pub fn get(&mut self, key: &u64) -> Option<usize> {
         let key = *key;
-        let hash64 = fold_hash_fast(key, self.seed);
+        let mut hash64 = fold_hash_fast(key, self.seed);
         let tag_hash = Tag::full(hash64);
+        let mut is_second_group = false;
 
         // First group
-        let pos = hash64 as usize & self.aligned_bucket_mask;
-        let group = unsafe { Group::load(self.ctrl(pos)) };
-        for bit in group.match_tag(tag_hash) {
-            let index = (pos + bit) & self.bucket_mask;
+        loop {
+            let pos = hash64 as usize & self.aligned_bucket_mask;
+            let group = unsafe { Group::load(self.ctrl(pos)) };
+            for bit in group.match_tag(tag_hash) {
+                let index = (pos + bit) & self.bucket_mask;
 
-            let bucket = unsafe { self.bucket(index) };
+                let bucket = unsafe { self.bucket(index) };
 
-            if unsafe { (*bucket).0 } == key {
-                return Some(index);
+                if likely(unsafe { (*bucket).0 } == key) {
+                    return Some(index);
+                }
             }
-        }
-        // TODO(reiner): possibly skip early return here. The early return prevents deletions.
-        if group.match_empty().any_bit_set() {
-            return None;
-        }
-
-        // Second group
-        let pos = hash64.rotate_left(32) as usize & self.aligned_bucket_mask;
-        let group = unsafe { Group::load(self.ctrl(pos)) };
-        for bit in group.match_tag(tag_hash) {
-            let index = (pos + bit) & self.bucket_mask;
-
-            let bucket = unsafe { self.bucket(index) };
-
-            if unsafe { (*bucket).0 } == key {
-                return Some(index);
+            // We skip early return on empty slots.
+            // * early return has ~no impact on find_hit, since we will have found the key anyway.
+            // * early return *slows down* in-cache find_miss, perhaps simply from time spent checking
+            //   for empty slots.
+            // * early return prevents deletions from working.
+            //
+            // Additionally, given early return is disabled, we can improve probe lengths even further,
+            // by doing "less-loaded" cuckoo insertions. We don't do that in this table but instead in
+            // a later one.
+            const ALLOW_EARLY_RETURN: bool = false;
+            if (ALLOW_EARLY_RETURN && likely(group.match_empty().any_bit_set())) || is_second_group {
+                return None;
             }
+            hash64 = hash64.rotate_left(32);
+            is_second_group = true;
         }
-        None
     }
 
     #[inline(always)]
