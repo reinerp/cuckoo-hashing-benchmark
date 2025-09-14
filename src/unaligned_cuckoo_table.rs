@@ -122,6 +122,7 @@ impl<V> HashTable<V> {
         let mut key = key;
         let mut value = value;
         let mut hash = hash1;
+        let mut tag_hash = tag_hash;
         loop {
             let pos = hash as usize & self.bucket_mask;
             let group = unsafe { Group::load(self.ctrl(pos)) };
@@ -136,6 +137,7 @@ impl<V> HashTable<V> {
             }
             let evict_index = self.rng.usize(..) % Group::WIDTH;
             (key, value) = std::mem::replace(unsafe { &mut *self.bucket(pos + evict_index) }, (key, value));
+            tag_hash = std::mem::replace(unsafe { &mut *self.ctrl(pos + evict_index) }, tag_hash);
             hash = fold_hash_fast(key, self.seed);
             let evicted_group_start = hash as usize & self.bucket_mask;
             if evict_index.wrapping_sub(evicted_group_start) & self.bucket_mask < Group::WIDTH {
