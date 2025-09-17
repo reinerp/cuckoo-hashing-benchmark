@@ -3,6 +3,7 @@
 
 use std::{alloc::Layout, ptr::NonNull};
 
+use crate::dropper::Dropper;
 use crate::TRACK_PROBE_LENGTH;
 use crate::control::{Group, Tag, TagSliceExt as _};
 use crate::u64_fold_hash_fast::fold_hash_fast;
@@ -28,6 +29,7 @@ pub struct HashTable<V> {
     total_probe_length: usize,
 
     marker: std::marker::PhantomData<V>,
+    dropper: Dropper,
 }
 
 /// Probe sequence based on triangular numbers, which is guaranteed (since our
@@ -91,6 +93,7 @@ impl<V> HashTable<V> {
             seed,
             marker: std::marker::PhantomData,
             total_probe_length: 0,
+            dropper: Dropper { alloc, layout },
         }
     }
 

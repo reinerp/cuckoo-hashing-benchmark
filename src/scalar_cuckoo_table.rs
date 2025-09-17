@@ -72,6 +72,7 @@ impl<V: Copy> U64HashSet<V> {
                     let element = unsafe { self.table.get_unchecked_mut(bucket_pos) };
                     if element.0 == 0 {
                         element.0 = key;
+                        element.1.write(value);
                         self.len += 1;
                         if TRACK_PROBE_LENGTH {
                             self.total_probe_length += probe_length;
@@ -79,6 +80,7 @@ impl<V: Copy> U64HashSet<V> {
                         return (true, bucket_pos);
                     }
                     if element.0 == key {
+                        element.1.write(value);
                         return (false, bucket_pos);
                     }
                     probe_length += 1;
@@ -102,6 +104,9 @@ impl<V: Copy> U64HashSet<V> {
     #[inline(always)]
     pub fn get(&mut self, key: &u64) -> Option<&V> {
         let key = *key;
+        if key == 0 {
+            return self.zero_value.as_ref();
+        }
         let mut hash64 = fold_hash_fast(key, self.seed);
         let bucket_mask = self.bucket_mask;
         for i in 0..2 {

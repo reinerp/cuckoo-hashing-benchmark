@@ -30,7 +30,7 @@ impl<V: Copy> U64HashSet<V> {
     #[inline(always)]
     pub fn with_capacity(capacity: usize) -> Self {
         // TODO: integer overflow...
-        let num_buckets = ((capacity * 8) / 7).next_power_of_two() * 2;
+        let num_buckets = ((capacity * 8) / 7).next_power_of_two();
         let table = vec![(0u64, MaybeUninit::uninit()); num_buckets].into_boxed_slice();
         let seed = fastrand::Rng::with_seed(123).u64(..);
         Self {
@@ -67,6 +67,7 @@ impl<V: Copy> U64HashSet<V> {
             let element = unsafe { self.table.get_unchecked_mut(bucket_pos) };
             if element.0 == 0 {
                 element.0 = key;
+                element.1.write(value);
                 self.len += 1;
                 if TRACK_PROBE_LENGTH {
                     self.total_probe_length += probe_length;
@@ -74,6 +75,7 @@ impl<V: Copy> U64HashSet<V> {
                 return (true, bucket_pos);
             }
             if element.0 == key {
+                element.1.write(value);
                 return (false, bucket_pos);
             }
             probe_length += 1;
@@ -98,6 +100,9 @@ impl<V: Copy> U64HashSet<V> {
     #[inline(always)]
     pub fn get(&mut self, key: &u64) -> Option<&V> {
         let key = *key;
+        if key == 0 {
+            return self.zero_value.as_ref();
+        }
         let hash64 = fold_hash_fast(key, self.seed);
         let bucket_mask = self.bucket_mask;
         let mut bucket_i = hash64 as usize;

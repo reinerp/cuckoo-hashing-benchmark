@@ -21,6 +21,7 @@ use crate::TRACK_PROBE_LENGTH;
 use crate::control::{Group, Tag, TagSliceExt as _};
 use crate::u64_fold_hash_fast::{self, fold_hash_fast};
 use crate::uunwrap::UUnwrap;
+use crate::dropper::Dropper;
 
 pub struct HashTable<V> {
     // Mask to get an index from a hash value. The value is one less than the
@@ -42,6 +43,7 @@ pub struct HashTable<V> {
     total_probe_length: usize,
     total_insert_probe_length: usize,
     max_insert_probe_length: usize,
+    dropper: Dropper,
 }
 
 impl<V> HashTable<V> {
@@ -74,6 +76,7 @@ impl<V> HashTable<V> {
             total_probe_length: 0,
             total_insert_probe_length: 0,
             max_insert_probe_length: 0,
+            dropper: Dropper { alloc, layout },
         }
     }
 

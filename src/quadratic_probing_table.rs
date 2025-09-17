@@ -8,6 +8,7 @@ use crate::TRACK_PROBE_LENGTH;
 use crate::control::{Group, Tag, TagSliceExt as _};
 use crate::u64_fold_hash_fast::fold_hash_fast;
 use crate::uunwrap::UUnwrap;
+use crate::dropper::Dropper;
 
 pub struct HashTable<V> {
     // Mask to get an index from a hash value. The value is one less than the
@@ -26,6 +27,7 @@ pub struct HashTable<V> {
 
     marker: std::marker::PhantomData<V>,
     total_probe_length: usize,
+    dropper: Dropper,
 }
 
 /// Probe sequence based on triangular numbers, which is guaranteed (since our
@@ -86,6 +88,7 @@ impl<V> HashTable<V> {
             seed,
             marker: std::marker::PhantomData,
             total_probe_length: 0,
+            dropper: Dropper { alloc, layout },
         }
     }
 

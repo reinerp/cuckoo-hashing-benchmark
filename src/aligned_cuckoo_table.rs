@@ -3,6 +3,7 @@
 use std::hint::{black_box, likely};
 use std::{alloc::Layout, ptr::NonNull};
 
+use crate::dropper::Dropper;
 use crate::TRACK_PROBE_LENGTH;
 use crate::control::{Group, Tag, TagSliceExt as _};
 use crate::u64_fold_hash_fast::{self, fold_hash_fast};
@@ -31,6 +32,8 @@ pub struct HashTable<V> {
     total_probe_length: usize,
     total_insert_probe_length: usize,
     max_insert_probe_length: usize,
+
+    dropper: Dropper,
 }
 
 impl<V> HashTable<V> {
@@ -66,6 +69,7 @@ impl<V> HashTable<V> {
             total_probe_length: 0,
             total_insert_probe_length: 0,
             max_insert_probe_length: 0,
+            dropper: Dropper { alloc, layout },
         }
     }
 
