@@ -23,6 +23,10 @@ trait HashTableExt {
 
 impl HashTableExt for hashbrown::HashMap<u64, u64> {}
 
+fn drop_spaces(s: &str) -> String {
+    s.split_whitespace().collect()
+}
+
 macro_rules! benchmark_find_miss {
     ($table:ty, $v:ty) => {
         (|n: usize| {
@@ -40,7 +44,7 @@ macro_rules! benchmark_find_miss {
             }
             black_box(found);
             let duration = start.elapsed();
-            println!("find_miss {}/{n}: {:.2} ns/op", stringify!($table), duration.as_nanos() as f64 / ITERS as f64);
+            println!("find_miss {}/{n}: {:.2} ns/op", drop_spaces(stringify!($table)), duration.as_nanos() as f64 / ITERS as f64);
             table.print_stats();
         })
     }
@@ -68,7 +72,7 @@ macro_rules! benchmark_find_hit {
             }
             black_box(found);
             let duration = start.elapsed();
-            println!("find_hit  {}/{n}: {:.2} ns/op", stringify!($table), duration.as_nanos() as f64 / true_iters as f64);
+            println!("find_hit  {}/{n}: {:.2} ns/op", drop_spaces(stringify!($table)), duration.as_nanos() as f64 / true_iters as f64);
         })
     }
 }
@@ -96,7 +100,7 @@ macro_rules! benchmark_find_latency {
                 black_box(prev_value);
             }
             let duration = start.elapsed();
-            println!("find_hit_latency  {}/{n}: {:.2} ns/op", stringify!($table), duration.as_nanos() as f64 / true_iters as f64);
+            println!("find_hit_latency  {}/{n}: {:.2} ns/op", drop_spaces(stringify!($table)), duration.as_nanos() as f64 / true_iters as f64);
         })
     }
 }
@@ -106,42 +110,25 @@ fn main() {
     for load_factor in [4, 5, 6, 7] {
         println!("load factor: {}/8", load_factor);
         let n = mi * load_factor / 8;
-        benchmark_find_miss!(quadratic_probing_table::HashTable::<u64>, u64)(n);
-        benchmark_find_miss!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n);
-        if load_factor < 7 {
-            benchmark_find_miss!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n);
+
+        macro_rules! benchmark_all {
+            ($benchmark:ident) => {
+                $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n);
+                $benchmark!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n);
+                if load_factor < 7 {
+                    $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n);
+                }
+                $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n);
+                $benchmark!(balancing_cuckoo_table::HashTable::<u64>, u64)(n);
+                $benchmark!(scalar_cache_line_aligned_table::U64HashSet::<u64>, u64)(n);
+                $benchmark!(scalar_unaligned_table::U64HashSet::<u64>, u64)(n);
+                $benchmark!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n);
+                $benchmark!(hashbrown::HashMap::<u64, u64>, u64)(n);
+            }
         }
-        benchmark_find_miss!(aligned_cuckoo_table::HashTable::<u64>, u64)(n);
-        benchmark_find_miss!(balancing_cuckoo_table::HashTable::<u64>, u64)(n);
-        benchmark_find_miss!(scalar_cache_line_aligned_table::U64HashSet::<u64>, u64)(n);
-        benchmark_find_miss!(scalar_unaligned_table::U64HashSet::<u64>, u64)(n);
-        benchmark_find_miss!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n);
-        benchmark_find_miss!(hashbrown::HashMap::<u64, u64>, u64)(n);
-
-        benchmark_find_hit!(quadratic_probing_table::HashTable::<u64>, u64)(n);
-        benchmark_find_hit!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n);
-        benchmark_find_hit!(aligned_cuckoo_table::HashTable::<u64>, u64)(n);
-        benchmark_find_hit!(balancing_cuckoo_table::HashTable::<u64>, u64)(n);
-        if load_factor < 7 {
-            benchmark_find_hit!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n);
-        }
-        benchmark_find_hit!(scalar_cache_line_aligned_table::U64HashSet::<u64>, u64)(n);
-        benchmark_find_hit!(scalar_unaligned_table::U64HashSet::<u64>, u64)(n);
-        benchmark_find_hit!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n);
-        benchmark_find_hit!(hashbrown::HashMap::<u64, u64>, u64)(n);
-
-        benchmark_find_latency!(quadratic_probing_table::HashTable::<u64>, u64)(n);
-        benchmark_find_latency!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n);
-        benchmark_find_latency!(aligned_cuckoo_table::HashTable::<u64>, u64)(n);
-        benchmark_find_latency!(balancing_cuckoo_table::HashTable::<u64>, u64)(n);
-        if load_factor < 7 {
-            benchmark_find_latency!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n);
-        }
-        benchmark_find_latency!(scalar_cache_line_aligned_table::U64HashSet::<u64>, u64)(n);
-        benchmark_find_latency!(scalar_unaligned_table::U64HashSet::<u64>, u64)(n);
-        benchmark_find_latency!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n);
-        benchmark_find_latency!(hashbrown::HashMap::<u64, u64>, u64)(n);
-
-
+        
+        benchmark_all!(benchmark_find_miss);
+        benchmark_all!(benchmark_find_hit);
+        benchmark_all!(benchmark_find_latency);
     }
 }
