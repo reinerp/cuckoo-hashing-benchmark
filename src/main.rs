@@ -6,6 +6,7 @@ use std::{hint::black_box, time::Instant};
 mod control;
 mod quadratic_probing_table;
 mod aligned_quadratic_probing_table;
+mod aligned_double_hashing_table;
 mod aligned_cuckoo_table;
 mod balancing_cuckoo_table;
 mod unaligned_cuckoo_table;
@@ -113,6 +114,7 @@ fn main() {
 
         macro_rules! benchmark_all {
             ($benchmark:ident) => {
+                $benchmark!(aligned_double_hashing_table::HashTable::<u64>, u64)(n);
                 $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n);
                 $benchmark!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n);
                 if load_factor < 7 {
