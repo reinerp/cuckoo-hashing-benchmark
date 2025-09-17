@@ -82,7 +82,7 @@ macro_rules! benchmark_find_latency {
                 let key = rng.u64(..);
                 table.insert(key, <$v>::default());
             }
-            let outer_iters = ITERS / n;
+            let outer_iters = (ITERS / 3) / n;
             let true_iters = outer_iters * n;
             let start = Instant::now();
             let mut found = 0;
