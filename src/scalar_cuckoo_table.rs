@@ -92,7 +92,7 @@ impl<V: Copy> U64HashSet<V> {
     }
 
     #[inline(always)]
-    pub fn get(&mut self, key: &u64) -> Option<usize> {
+    pub fn get(&mut self, key: &u64) -> Option<&V> {
         let key = *key;
         let mut hash64 = fold_hash_fast(key, self.seed);
         let bucket_mask = self.bucket_mask;
@@ -102,7 +102,7 @@ impl<V: Copy> U64HashSet<V> {
                 let bucket_pos = (hash64 as usize + j) & bucket_mask;
                 let element = unsafe { self.table.get_unchecked_mut(bucket_pos) };
                 if element.0 == key {
-                    return Some(bucket_pos);
+                    return Some(unsafe { self.table.get_unchecked(bucket_pos).1.assume_init_ref() });
                 }
             }
             hash64 = hash64.rotate_left(32);

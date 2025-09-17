@@ -78,16 +78,17 @@ impl<V: Copy> U64HashSet<V> {
     }
 
     #[inline(always)]
-    pub fn get(&mut self, key: &u64) -> Option<usize> {
+    pub fn get(&mut self, key: &u64) -> Option<&V> {
         let key = *key;
         let hash64 = fold_hash_fast(key, self.seed);
         let bucket_mask = self.bucket_mask;
         let mut bucket_i = hash64 as usize;
         loop {
             // Safety: bucket_mask is correct because the number of buckets is a power of 2.
-            let element = unsafe { self.table.get_unchecked_mut(bucket_i & bucket_mask) };
+            let bucket_pos = bucket_i & bucket_mask;
+            let element = unsafe { self.table.get_unchecked_mut(bucket_pos) };
             if element.0 == key {
-                return Some(bucket_i);
+                return Some(unsafe { self.table.get_unchecked(bucket_pos).1.assume_init_ref() });
             } else if element.0 == 0 {
                 return None;
             }

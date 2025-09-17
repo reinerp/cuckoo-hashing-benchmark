@@ -73,6 +73,34 @@ macro_rules! benchmark_find_hit {
     }
 }
 
+macro_rules! benchmark_find_latency {
+    ($table:ty, $v:ty) => {
+        (|n: usize| {
+            let mut table = <$table>::with_capacity(n);
+            let mut rng = fastrand::Rng::with_seed(123);
+            for _ in 0..n {
+                let key = rng.u64(..);
+                table.insert(key, <$v>::default());
+            }
+            let outer_iters = ITERS / n;
+            let true_iters = outer_iters * n;
+            let start = Instant::now();
+            let mut found = 0;
+            for _ in 0..outer_iters {
+                let mut rng = fastrand::Rng::with_seed(123);
+                let mut prev_value = 0;
+                for _ in 0..n {
+                    let key = rng.u64(..) ^ prev_value;
+                    prev_value = *table.get(&key).unwrap();
+                }
+                black_box(prev_value);
+            }
+            let duration = start.elapsed();
+            println!("find_hit_latency  {}/{n}: {:.2} ns/op", stringify!($table), duration.as_nanos() as f64 / true_iters as f64);
+        })
+    }
+}
+
 fn main() {
     let mi = 1 << 20;
     for load_factor in [4, 5, 6, 7] {
@@ -101,5 +129,19 @@ fn main() {
         benchmark_find_hit!(scalar_unaligned_table::U64HashSet::<u64>, u64)(n);
         benchmark_find_hit!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n);
         benchmark_find_hit!(hashbrown::HashMap::<u64, u64>, u64)(n);
+
+        benchmark_find_latency!(quadratic_probing_table::HashTable::<u64>, u64)(n);
+        benchmark_find_latency!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n);
+        benchmark_find_latency!(aligned_cuckoo_table::HashTable::<u64>, u64)(n);
+        benchmark_find_latency!(balancing_cuckoo_table::HashTable::<u64>, u64)(n);
+        if load_factor < 7 {
+            benchmark_find_latency!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n);
+        }
+        benchmark_find_latency!(scalar_cache_line_aligned_table::U64HashSet::<u64>, u64)(n);
+        benchmark_find_latency!(scalar_unaligned_table::U64HashSet::<u64>, u64)(n);
+        benchmark_find_latency!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n);
+        benchmark_find_latency!(hashbrown::HashMap::<u64, u64>, u64)(n);
+
+
     }
 }

@@ -186,7 +186,7 @@ impl<V> HashTable<V> {
     }
 
     #[inline(always)]
-    pub fn get(&mut self, key: &u64) -> Option<usize> {
+    pub fn get(&mut self, key: &u64) -> Option<&V> {
         let key = *key;
         let mut hash64 = fold_hash_fast(key, self.seed);
         let tag_hash = Tag::full(hash64);
@@ -202,7 +202,7 @@ impl<V> HashTable<V> {
                 let bucket = unsafe { self.bucket(index) };
 
                 if likely(unsafe { (*bucket).0 } == key) {
-                    return Some(index);
+                    return Some(unsafe { &(*bucket).1 });
                 }
             }
             // We skip early return on empty slots.
