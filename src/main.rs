@@ -17,7 +17,7 @@ mod unaligned_cuckoo_table;
 mod uunwrap;
 mod dropper;
 
-const ITERS: usize = 100_000_000;
+const ITERS: usize = 10_000_000;
 const TRACK_PROBE_LENGTH: bool = false;
 
 trait PrintStats {
@@ -169,7 +169,7 @@ macro_rules! benchmark_insert_and_erase {
 }
 
 fn main() {
-    for lg_mi in [28] {
+    for lg_mi in [10, 15, 20, 25] {
         println!("mi: 2^{lg_mi}");
         let mi = 1 << lg_mi;
         for load_factor in [4, 5, 6, 7] {
@@ -182,23 +182,21 @@ fn main() {
                     let is_insert_and_erase = std::stringify!($benchmark) == "benchmark_insert_and_erase";
                     $benchmark!(aligned_double_hashing_table::HashTable::<u64>, u64)(n);
                     $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n);
-                    $benchmark!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n);
-                    if load_factor < 7 && (!is_insert_and_erase || load_factor < 6) && lg_mi < 25 {
-                        // This cuckoo table doesn't work for large load factors.
-                        $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n);
-                    }
-                    if !is_insert_and_erase || load_factor < 7 {
-                        $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n);
-                    }
-                    if !is_insert_and_erase || load_factor < 7 {
-                        $benchmark!(balancing_cuckoo_table::HashTable::<u64>, u64)(n);
-                    }
-                    $benchmark!(scalar_cache_line_aligned_table::U64HashSet::<u64>, u64)(n);
-                    $benchmark!(scalar_unaligned_table::U64HashSet::<u64>, u64)(n);
-                    if !is_insert_and_erase || load_factor < 6 {
-                        $benchmark!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n);
-                    }
-                    $benchmark!(hashbrown::HashMap::<u64, u64>, u64)(n);
+                    // $benchmark!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n);
+                    // if load_factor < 7 && (!is_insert_and_erase || load_factor < 6) && lg_mi < 25 {
+                    //     // This cuckoo table doesn't work for large load factors.
+                    //     $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n);
+                    // }
+                    $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n);
+                    // if !is_insert_and_erase || load_factor < 7 {
+                    //     $benchmark!(balancing_cuckoo_table::HashTable::<u64>, u64)(n);
+                    // }
+                    // $benchmark!(scalar_cache_line_aligned_table::U64HashSet::<u64>, u64)(n);
+                    // $benchmark!(scalar_unaligned_table::U64HashSet::<u64>, u64)(n);
+                    // if !is_insert_and_erase || load_factor < 6 {
+                    //     $benchmark!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n);
+                    // }
+                    // $benchmark!(hashbrown::HashMap::<u64, u64>, u64)(n);
                 }
             }
 

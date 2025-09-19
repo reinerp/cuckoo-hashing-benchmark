@@ -151,27 +151,6 @@ impl<V: Copy> HashTable<V> {
         // TODO: this check is redundant with the BFS loop below.
         self.items += 1;
 
-        let mut insert_probe_length = 1;
-        if let Some(insert_slot) = group0.match_empty().lowest_set_bit() {
-            let insert_slot = (pos0 + insert_slot) & self.bucket_mask;
-            unsafe {
-                self.set_ctrl(insert_slot, tag_hash);
-                self.bucket(insert_slot).write((key, value));
-                if TRACK_PROBE_LENGTH {
-                    self.total_probe_length += 1;
-                    self.total_insert_probe_length += insert_probe_length;
-                    self.max_insert_probe_length =
-                        self.max_insert_probe_length.max(insert_probe_length);
-                }
-                return (true, insert_slot);
-            }
-        }
-
-        // key is going to get inserted in the second location.
-        if TRACK_PROBE_LENGTH {
-            self.total_probe_length += 2;
-        }
-
         // Cuckoo loop. BFS queue maintains group indexes to visit.
         //
         // We search two complete N-ary trees, where N=Group::WIDTH. We search up to depth D=3, i.e. 
@@ -182,54 +161,77 @@ impl<V: Copy> HashTable<V> {
         const N: usize = Group::WIDTH;
         const BFS_MAX_LEN: usize = 2 * (1 + N + N*N + N*N*N);
 
+        let mut pos0 = pos0;
+        let mut pos1 = pos1;
+        let mut group0 = group0;
+        let mut group1 = group1;
+
         let mut bfs_queue = [MaybeUninit::<usize>::uninit(); BFS_MAX_LEN];
         bfs_queue[0].write(pos0);
         bfs_queue[1].write(pos1);
         let mut bfs_read_pos = 0;
-        for bfs_read_pos in 0..BFS_MAX_LEN {
-            // TODO: unroll this inner loop 2x.
-            let pos = unsafe { bfs_queue[bfs_read_pos].assume_init() };
-            let group = unsafe { Group::load(self.ctrl(pos)) };
-            if let Some(empty_pos) = group.match_empty().lowest_set_bit() {
-                // We found the closest empty slot. Move to it.
-                let mut path_index = bfs_read_pos;
-                let mut bucket_index = pos + empty_pos;
-                while path_index >= 2 {
-                    let parent_path_index = (path_index - 2) / N;
-                    let parent_bucket_offset = (path_index - 2) % N;
-                    let parent_bucket_index = unsafe { bfs_queue.get_unchecked(parent_path_index).assume_init() } + parent_bucket_offset;
-                    
-                    // Move from parent to child.
-                    unsafe {
-                        let parent_kv = self.bucket(parent_bucket_index).read();
-                        self.bucket(bucket_index).write(parent_kv);
-                        self.set_ctrl(bucket_index, unsafe { *self.ctrl(parent_bucket_index) });
-                    }
-                    bucket_index = parent_bucket_index;
-                    path_index = parent_path_index;
-                }
-                unsafe {
-                    self.bucket(bucket_index).write((key, value));
-                    self.set_ctrl(bucket_index, tag_hash);    
-                }
-                return (true, bucket_index);
+        let (mut path_index, mut bucket_index) = loop {
+            if let Some(empty_pos) = group0.match_empty().lowest_set_bit() {
+                break (bfs_read_pos + 0, pos0 + empty_pos);
             }
+            if let Some(empty_pos) = group1.match_empty().lowest_set_bit() {
+                break (bfs_read_pos + 1, pos1 + empty_pos);
+            }
+
             let bfs_write_pos = bfs_read_pos * N + 2;
             if bfs_write_pos < BFS_MAX_LEN {
                 for i in 0..N {
-                    let key = unsafe { (*self.bucket(pos + i)).0 };
+                    // First bucket
+                    let key = unsafe { (*self.bucket(pos0 + i)).0 };
                     let hash = fold_hash_fast(key, self.seed);
                     let key_pos0 = hash as usize & self.aligned_bucket_mask;
                     let key_pos1 = hash.rotate_left(32) as usize & self.aligned_bucket_mask;
-                    let other_pos = std::hint::select_unpredictable(key_pos0 == pos, key_pos1, key_pos0);
+                    let other_pos = std::hint::select_unpredictable(key_pos0 == pos0, key_pos1, key_pos0);
                     unsafe { 
                         *bfs_queue.get_unchecked_mut(bfs_write_pos + i).write(other_pos);
                     }
+                    // Second bucket
+                    let key = unsafe { (*self.bucket(pos1 + i)).0 };
+                    let hash = fold_hash_fast(key, self.seed);
+                    let key_pos0 = hash as usize & self.aligned_bucket_mask;
+                    let key_pos1 = hash.rotate_left(32) as usize & self.aligned_bucket_mask;
+                    let other_pos = std::hint::select_unpredictable(key_pos0 == pos1, key_pos1, key_pos0);
+                    unsafe { 
+                        *bfs_queue.get_unchecked_mut(bfs_write_pos + i + N).write(other_pos);
+                    }
                 }
             }
+
+            bfs_read_pos += 2;
+
+            if bfs_read_pos + 2 > BFS_MAX_LEN {
+                panic!("Failed to insert into cuckoo table; need to rehash");
+            }
+            pos0 = unsafe { bfs_queue[bfs_read_pos + 0].assume_init() };
+            pos1 = unsafe { bfs_queue[bfs_read_pos + 1].assume_init() };
+            group0 = unsafe { Group::load(self.ctrl(pos0)) };
+            group1 = unsafe { Group::load(self.ctrl(pos1)) };
+        };
+        while path_index >= 2 {
+            let parent_path_index = (path_index - 2) / N;
+            let parent_bucket_offset = (path_index - 2) % N;
+            let parent_bucket_index = unsafe { bfs_queue.get_unchecked(parent_path_index).assume_init() } + parent_bucket_offset;
+            
+            // Move from parent to child.
+            unsafe {
+                let parent_kv = self.bucket(parent_bucket_index).read();
+                self.bucket(bucket_index).write(parent_kv);
+                self.set_ctrl(bucket_index, unsafe { *self.ctrl(parent_bucket_index) });
+            }
+            bucket_index = parent_bucket_index;
+            path_index = parent_path_index;
         }
-        panic!("Failed to insert into cuckoo table; need to rehash");
-    }
+        unsafe {
+            self.bucket(bucket_index).write((key, value));
+            self.set_ctrl(bucket_index, tag_hash);    
+        }
+        return (true, bucket_index);
+}
 
     #[inline(always)]
     pub fn get(&mut self, key: &u64) -> Option<&V> {
