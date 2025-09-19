@@ -1,6 +1,7 @@
 //! A cuckoo hash table with 2 choices of group, each with 8-16 buckets per group.
 
 use std::hint::{black_box, likely};
+use std::mem::MaybeUninit;
 use std::{alloc::Layout, ptr::NonNull};
 
 use crate::dropper::Dropper;
@@ -9,7 +10,7 @@ use crate::control::{Group, Tag, TagSliceExt as _};
 use crate::u64_fold_hash_fast::{self, fold_hash_fast};
 use crate::uunwrap::UUnwrap;
 
-pub struct HashTable<V> {
+pub struct HashTable<V: Copy> {
     // Mask to get an index from a hash value. The value is one less than the
     // number of buckets in the table.
     bucket_mask: usize,
@@ -36,7 +37,7 @@ pub struct HashTable<V> {
     dropper: Dropper,
 }
 
-impl<V> HashTable<V> {
+impl<V: Copy> HashTable<V> {
     pub fn with_capacity(capacity: usize) -> Self {
         // Calculate sizes
         // TODO: integer overflow...
@@ -147,13 +148,15 @@ impl<V> HashTable<V> {
         }
 
         // No match. Now check first group for an empty slot.
+        // TODO: this check is redundant with the BFS loop below.
+        self.items += 1;
+
         let mut insert_probe_length = 1;
         if let Some(insert_slot) = group0.match_empty().lowest_set_bit() {
             let insert_slot = (pos0 + insert_slot) & self.bucket_mask;
             unsafe {
                 self.set_ctrl(insert_slot, tag_hash);
                 self.bucket(insert_slot).write((key, value));
-                self.items += 1;
                 if TRACK_PROBE_LENGTH {
                     self.total_probe_length += 1;
                     self.total_insert_probe_length += insert_probe_length;
@@ -169,51 +172,63 @@ impl<V> HashTable<V> {
             self.total_probe_length += 2;
         }
 
-        // Cuckoo loop. Loop entry invariant: (key, value, hash) has no space in prev_group and should be tried in group `hash`.
-        let mut key = key;
-        let mut value = value;
-        let mut hash = hash1;
-        let mut tag_hash = tag_hash;
-        loop {
-            let pos = hash as usize & self.aligned_bucket_mask;
+        // Cuckoo loop. BFS queue maintains group indexes to visit.
+        //
+        // We search two complete N-ary trees, where N=Group::WIDTH. We search up to depth D=3, i.e. 
+        // 2 groups at the first level, 2*N, 2*N^2, 2*N^3.
+        //
+        // The parent of node at index `i` is at index `(i-2)/N`. Inversely, the first child of 
+        // node `j` is at index `j*N+2`.
+        const N: usize = Group::WIDTH;
+        const BFS_MAX_LEN: usize = 2 * (1 + N + N*N + N*N*N);
+
+        let mut bfs_queue = [MaybeUninit::<usize>::uninit(); BFS_MAX_LEN];
+        bfs_queue[0].write(pos0);
+        bfs_queue[1].write(pos1);
+        let mut bfs_read_pos = 0;
+        for bfs_read_pos in 0..BFS_MAX_LEN {
+            // TODO: unroll this inner loop 2x.
+            let pos = unsafe { bfs_queue[bfs_read_pos].assume_init() };
             let group = unsafe { Group::load(self.ctrl(pos)) };
-            if let Some(insert_slot) = group.match_empty().lowest_set_bit() {
-                let insert_slot = (pos + insert_slot) & self.bucket_mask;
-                unsafe {
-                    self.set_ctrl(insert_slot, tag_hash);
-                    self.bucket(insert_slot).write((key, value));
-                    self.items += 1;
-                    if TRACK_PROBE_LENGTH {
-                        insert_probe_length += 1;
-                        self.total_insert_probe_length += insert_probe_length;
-                        self.max_insert_probe_length =
-                            self.max_insert_probe_length.max(insert_probe_length);
+            if let Some(empty_pos) = group.match_empty().lowest_set_bit() {
+                // We found the closest empty slot. Move to it.
+                let mut path_index = bfs_read_pos;
+                let mut bucket_index = pos + empty_pos;
+                while path_index >= 2 {
+                    let parent_path_index = (path_index - 2) / N;
+                    let parent_bucket_offset = (path_index - 2) % N;
+                    let parent_bucket_index = unsafe { bfs_queue.get_unchecked(parent_path_index).assume_init() } + parent_bucket_offset;
+                    
+                    // Move from parent to child.
+                    unsafe {
+                        let parent_kv = self.bucket(parent_bucket_index).read();
+                        self.bucket(bucket_index).write(parent_kv);
+                        self.set_ctrl(bucket_index, unsafe { *self.ctrl(parent_bucket_index) });
                     }
-                    return (true, insert_slot);
+                    bucket_index = parent_bucket_index;
+                    path_index = parent_path_index;
+                }
+                unsafe {
+                    self.bucket(bucket_index).write((key, value));
+                    self.set_ctrl(bucket_index, tag_hash);    
+                }
+                return (true, bucket_index);
+            }
+            let bfs_write_pos = bfs_read_pos * N + 2;
+            if bfs_write_pos < BFS_MAX_LEN {
+                for i in 0..N {
+                    let key = unsafe { (*self.bucket(pos + i)).0 };
+                    let hash = fold_hash_fast(key, self.seed);
+                    let key_pos0 = hash as usize & self.aligned_bucket_mask;
+                    let key_pos1 = hash.rotate_left(32) as usize & self.aligned_bucket_mask;
+                    let other_pos = std::hint::select_unpredictable(key_pos0 == pos, key_pos1, key_pos0);
+                    unsafe { 
+                        *bfs_queue.get_unchecked_mut(bfs_write_pos + i).write(other_pos);
+                    }
                 }
             }
-            let evict_index = self.rng.usize(..) % Group::WIDTH;
-            (key, value) = std::mem::replace(
-                unsafe { &mut *self.bucket(pos + evict_index) },
-                (key, value),
-            );
-            tag_hash = std::mem::replace(unsafe { &mut *self.ctrl(pos + evict_index) }, tag_hash);
-            hash = fold_hash_fast(key, self.seed);
-            if hash as usize & self.aligned_bucket_mask == pos {
-                // We evict from its first location and move to its second location.
-                if TRACK_PROBE_LENGTH {
-                    self.total_probe_length += 1;
-                }
-                hash = hash.rotate_left(32);
-            } else {
-                // We evict from its second location and move to its first location.
-                if TRACK_PROBE_LENGTH {
-                    self.total_probe_length -= 1;
-                }
-            }
-            insert_probe_length += 1;
-            // TODO: panic and rehash on loop.
         }
+        panic!("Failed to insert into cuckoo table; need to rehash");
     }
 
     #[inline(always)]
