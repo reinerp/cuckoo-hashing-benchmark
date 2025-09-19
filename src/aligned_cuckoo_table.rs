@@ -114,8 +114,8 @@ impl<V: Copy> HashTable<V> {
     #[inline(always)]
     pub fn insert(&mut self, key: u64, value: V) -> (bool, usize) {
         let hash0 = fold_hash_fast(key, self.seed);
-        let hash1 = hash0.rotate_left(32);
         let tag_hash = Tag::full(hash0);
+        let hash1 = hash0 ^ (tag_hash.0 as u64 * Group::WIDTH as u64);
 
         // Probe first group for a match.
         let pos0 = hash0 as usize & self.aligned_bucket_mask;
@@ -181,23 +181,11 @@ impl<V: Copy> HashTable<V> {
             let bfs_write_pos = bfs_read_pos * N + 2;
             if bfs_write_pos < BFS_MAX_LEN {
                 for i in 0..N {
-                    // First bucket
-                    let key = unsafe { (*self.bucket(pos0 + i)).0 };
-                    let hash = fold_hash_fast(key, self.seed);
-                    let key_pos0 = hash as usize & self.aligned_bucket_mask;
-                    let key_pos1 = hash.rotate_left(32) as usize & self.aligned_bucket_mask;
-                    let other_pos = std::hint::select_unpredictable(key_pos0 == pos0, key_pos1, key_pos0);
+                    let other_pos0 = pos0 ^ ((unsafe { *self.ctrl(pos0 + i) }).0 as usize * Group::WIDTH);
+                    let other_pos1 = pos1 ^ ((unsafe { *self.ctrl(pos1 + i) }).0 as usize * Group::WIDTH);
                     unsafe { 
-                        *bfs_queue.get_unchecked_mut(bfs_write_pos + i).write(other_pos);
-                    }
-                    // Second bucket
-                    let key = unsafe { (*self.bucket(pos1 + i)).0 };
-                    let hash = fold_hash_fast(key, self.seed);
-                    let key_pos0 = hash as usize & self.aligned_bucket_mask;
-                    let key_pos1 = hash.rotate_left(32) as usize & self.aligned_bucket_mask;
-                    let other_pos = std::hint::select_unpredictable(key_pos0 == pos1, key_pos1, key_pos0);
-                    unsafe { 
-                        *bfs_queue.get_unchecked_mut(bfs_write_pos + i + N).write(other_pos);
+                        *bfs_queue.get_unchecked_mut(bfs_write_pos + i).write(other_pos0);
+                        *bfs_queue.get_unchecked_mut(bfs_write_pos + i + N).write(other_pos1);
                     }
                 }
             }
@@ -267,7 +255,7 @@ impl<V: Copy> HashTable<V> {
             {
                 return None;
             }
-            hash64 = hash64.rotate_left(32);
+            hash64 = hash64 ^ ((tag_hash.0 as u64 * Group::WIDTH as u64) as u64);
             is_second_group = true;
         }
     }

@@ -171,7 +171,7 @@ macro_rules! benchmark_insert_and_erase {
 }
 
 fn main() {
-    for lg_mi in [10, 15, 20, 25] {
+    for lg_mi in [25] {
         println!("mi: 2^{lg_mi}");
         let mi = 1 << lg_mi;
         for load_factor in [4, 5, 6, 7] {
@@ -203,9 +203,9 @@ fn main() {
                 }
             }
 
-            benchmark_all!(benchmark_find_miss);
-            benchmark_all!(benchmark_find_hit);
-            benchmark_all!(benchmark_find_latency);
+            // benchmark_all!(benchmark_find_miss);
+            // benchmark_all!(benchmark_find_hit);
+            // benchmark_all!(benchmark_find_latency);
             benchmark_all!(benchmark_insert_and_erase);
         }
     }
