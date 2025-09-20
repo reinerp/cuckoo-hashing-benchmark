@@ -19,3 +19,28 @@ Benchmark for cuckoo hashing
 * Probes are relatively slower.
 * At tables >=2^15 and load factors >4/8 we see big penalties from branch misprediction on find_hit. std::hint::select_unpredictable improves performance considerably.
 * The main advantage over Indirect SIMD, namely only one cache line per lookup, is achieved better by Direct SIMD. This applies to out-of-cache latency as well.
+
+## Overall recommendations
+
+u64 (and probably also u32) keys:
+* Are the majority of operations unseen keys (either for lookup or insert)?
+  * If yes, then is it a *large*, *build-mostly* table? (More precisely: >2^25 elements, and majority of operations are insertions?)
+    * If yes, then *don't* use cuckoo hashing. Use indirect SIMD with quadratic probing, i.e. what hashbrown / Swiss Tables do.
+    * If no, then use cuckoo hashing with indirect SIMD.
+  * If no, then use cuckoo hashing with direct SIMD
+
+string keys (and other large keys):
+* Direct SIMD isn't applicable. Then it's just a choice between cuckoo and quadratic probing.
+* Is it a large, build-mostly table?
+  * If yes, do indirect SIMD with quadratic probing, i.e. what hashbrown / Swiss Tables do.
+  * If no, do indirect SIMD with cuckoo hashing.
+
+Overall flowchart:
+* Do you need fast union/intersect operations between multiple tables?
+  * Then use Robin Hood hashing, to support traversals ordered by hash.
+* Is it a *large*, *build-mostly* table? (More precisely: >2^25 elements, and majority of operations are insertions?)
+  * Then use indirect SIMD with quadratic probing, i.e. what hashbrown / Swiss Tables do.
+  * TODO: what about cuckoo hashing with longer probes, e.g. repeated 2x?
+* Does it have integer-like keys (fixed-size 4-8 byte keys), and are most operations on already-seen keys?
+  * Then use cuckoo hashing with Direct SIMD.
+* Otherwise, use cuckoo hashing with Indirect SIMD.
