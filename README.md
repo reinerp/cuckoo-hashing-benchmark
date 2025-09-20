@@ -1,2 +1,19 @@
 # cuckoo-hashing-benchmark
 Benchmark for cuckoo hashing
+
+## Findings so far
+
+**Cuckoo hashing** works really, both in SIMD and non-SIMD context. Improves find_miss and insertion, neutral on find_hit.
+* Big improvement on find_miss and insertion, especially at large load factors, and especially for in-TLB (nearly-in-cache) tables.
+* TODO: BFS loop should be "hash then search", not "search then hash". That avoids redundant hashing operations.
+* For huge tables (out-of-cache, out-of-TLB), insertion is a little slower.
+* Cuckoo actually has *faster* insertion than non-cuckoo for in-cache tables, with advantage growing as load factor increases. However, for out-of-cache tables (2^25) cuckoo falls behind. I suspect this is because quadratic probing stays on the same line (or few lines) for a while, whereas cuckoo doesn't. Specifically, with 8-byte probe sequences, the probe ranges are at the following offsets from the starting position: 0 bytes, 8 bytes, 24 bytes, 48 bytes, 80 bytes. The first 3 will usually be on the same cache line, and the first 5 will usually be on two cache lines. This is 3 times better than cuckoo probing, which takes one cache line per probe.
+
+**Indirect SIMD** probing works really well at large load factors, where it improves almost everything. 
+
+**Direct SIMD** probing is an improvement on find_hit, but worse on find_miss and insertion.
+* The main issue is that it can't probe as fast: indirect SIMD probing (on 1 byte tags) can probe 8-16 values per SIMD instruction, whereas direct SIMD probing on u64 probes 2 values per SIMD instruction. 
+* Also for out-of-cache tables and find_miss/insertion it actually makes *more* cache misses because it fetches 8 bytes per key rather than 1 byte per key.
+
+**Scalar** probing is mostly an improvement on find_hit_latency, and is mostly worse on everything else.
+* Probes are relatively slower.
