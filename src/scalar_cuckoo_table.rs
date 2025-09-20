@@ -109,20 +109,22 @@ impl<V: Copy> U64HashSet<V> {
         }
         let mut hash64 = fold_hash_fast(key, self.seed);
         let bucket_mask = self.bucket_mask;
+        // let mut result = None;
         for i in 0..2 {
+            let mut result = None;
             // Safety: bucket_mask is correct because the number of buckets is a power of 2.
             for j in 0..WINDOW_SIZE {
                 let bucket_pos = (hash64 as usize + j) & bucket_mask;
-                let element = unsafe { self.table.get_unchecked_mut(bucket_pos) };
-                if element.0 == key {
-                    return Some(unsafe {
-                        self.table.get_unchecked(bucket_pos).1.assume_init_ref()
-                    });
-                }
+                let element = unsafe { self.table.get_unchecked(bucket_pos) };
+                result = std::hint::select_unpredictable(element.0 == key, Some(unsafe { &self.table.get_unchecked(bucket_pos).1 }), result);
+            }
+            if let Some(result) = result {
+                return Some(unsafe { result.assume_init_ref() });
             }
             hash64 = hash64.rotate_left(32);
         }
         None
+        // result.map(|result| unsafe { result.assume_init_ref() })
     }
 
     #[inline(always)]

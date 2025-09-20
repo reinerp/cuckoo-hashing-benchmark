@@ -17,3 +17,5 @@ Benchmark for cuckoo hashing
 
 **Scalar** probing is mostly an improvement on find_hit_latency, and is mostly worse on everything else.
 * Probes are relatively slower.
+* At tables >=2^15 and load factors >4/8 we see big penalties from branch misprediction on find_hit. std::hint::select_unpredictable improves performance considerably.
+* The main advantage over Indirect SIMD, namely only one cache line per lookup, is achieved better by Direct SIMD. This applies to out-of-cache latency as well.
