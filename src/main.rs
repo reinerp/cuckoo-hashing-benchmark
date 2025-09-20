@@ -16,6 +16,8 @@ mod u64_fold_hash_fast;
 mod unaligned_cuckoo_table;
 mod uunwrap;
 mod dropper;
+mod direct_simd_cuckoo_table;
+mod control64;
 
 const ITERS: usize = 10_000_000;
 const TRACK_PROBE_LENGTH: bool = false;
@@ -188,6 +190,7 @@ fn main() {
                     //     $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n);
                     // }
                     $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n);
+                    $benchmark!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n);
                     // if !is_insert_and_erase || load_factor < 7 {
                     //     $benchmark!(balancing_cuckoo_table::HashTable::<u64>, u64)(n);
                     // }
