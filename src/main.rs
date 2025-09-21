@@ -171,7 +171,7 @@ macro_rules! benchmark_insert_and_erase {
 }
 
 fn main() {
-    for lg_mi in [25] {
+    for lg_mi in [15, 20, 25, 28] {
         println!("mi: 2^{lg_mi}");
         let mi = 1 << lg_mi;
         for load_factor in [4, 5, 6, 7] {

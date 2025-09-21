@@ -115,7 +115,7 @@ impl<V: Copy> HashTable<V> {
     pub fn insert(&mut self, key: u64, value: V) -> (bool, usize) {
         let hash0 = fold_hash_fast(key, self.seed);
         let tag_hash = Tag::full(hash0);
-        let hash1 = hash0 ^ (tag_hash.0 as u64 * Group::WIDTH as u64);
+        let hash1 = hash0 ^ scramble_tag(tag_hash);
 
         // Probe first group for a match.
         let pos0 = hash0 as usize & self.aligned_bucket_mask;
@@ -181,8 +181,8 @@ impl<V: Copy> HashTable<V> {
             let bfs_write_pos = bfs_read_pos * N + 2;
             if bfs_write_pos < BFS_MAX_LEN {
                 for i in 0..N {
-                    let other_pos0 = pos0 ^ ((unsafe { *self.ctrl(pos0 + i) }).0 as usize * Group::WIDTH);
-                    let other_pos1 = pos1 ^ ((unsafe { *self.ctrl(pos1 + i) }).0 as usize * Group::WIDTH);
+                    let other_pos0 = pos0 ^ (scramble_tag(unsafe { *self.ctrl(pos0 + i) }) as usize & self.aligned_bucket_mask);
+                    let other_pos1 = pos1 ^ (scramble_tag(unsafe { *self.ctrl(pos1 + i) }) as usize & self.aligned_bucket_mask);
                     unsafe { 
                         *bfs_queue.get_unchecked_mut(bfs_write_pos + i).write(other_pos0);
                         *bfs_queue.get_unchecked_mut(bfs_write_pos + i + N).write(other_pos1);
@@ -255,7 +255,8 @@ impl<V: Copy> HashTable<V> {
             {
                 return None;
             }
-            hash64 = hash64 ^ ((tag_hash.0 as u64 * Group::WIDTH as u64) as u64);
+            let tag64 = scramble_tag(tag_hash);
+            hash64 = hash64 ^ tag64;
             is_second_group = true;
         }
     }
@@ -290,3 +291,9 @@ impl<V: Copy> HashTable<V> {
         *self.ctrl(index) = tag;
     }
 }
+
+fn scramble_tag(tag: Tag) -> u64 {
+    (tag.0 as u64).wrapping_mul(MUL).rotate_left(32)
+}
+
+const MUL: u64 = 0x2d35_8dcc_aa6c_78a5;
