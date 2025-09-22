@@ -44,10 +44,10 @@ fn drop_spaces(s: &str) -> String {
 
 macro_rules! benchmark_find_miss {
     ($table:ty, $v:ty) => {
-        (|n: usize| {
+        (|n: usize, capacity: usize| {
             print!("find_miss  {}/{n}: ", drop_spaces(stringify!($table)));
             std::io::stdout().flush().unwrap();
-            let mut table = <$table>::with_capacity(n);
+            let mut table = <$table>::with_capacity(capacity);
             let mut rng = fastrand::Rng::with_seed(123);
             for _ in 0..n {
                 let key = rng.u64(..);
@@ -71,10 +71,10 @@ macro_rules! benchmark_find_miss {
 
 macro_rules! benchmark_find_hit {
     ($table:ty, $v:ty) => {
-        (|n: usize| {
+        (|n: usize, capacity: usize| {
             print!("find_hit  {}/{n}: ", drop_spaces(stringify!($table)));
             std::io::stdout().flush().unwrap();
-            let mut table = <$table>::with_capacity(n);
+            let mut table = <$table>::with_capacity(capacity);
             let mut rng = fastrand::Rng::with_seed(123);
             for _ in 0..n {
                 let key = rng.u64(..);
@@ -103,13 +103,13 @@ macro_rules! benchmark_find_hit {
 
 macro_rules! benchmark_find_latency {
     ($table:ty, $v:ty) => {
-        (|n: usize| {
+        (|n: usize, capacity: usize| {
             print!(
                 "find_hit_latency  {}/{n}: ",
                 drop_spaces(stringify!($table))
             );
             std::io::stdout().flush().unwrap();
-            let mut table = <$table>::with_capacity(n);
+            let mut table = <$table>::with_capacity(capacity);
             let mut rng = fastrand::Rng::with_seed(123);
             for _ in 0..n {
                 let key = rng.u64(..);
@@ -142,10 +142,10 @@ macro_rules! benchmark_find_latency {
 
 macro_rules! benchmark_insert_and_erase {
     ($table:ty, $v:ty) => {
-        (|n: usize| {
+        (|n: usize, capacity: usize| {
             print!("insert_erase  {}/{n}: ", drop_spaces(stringify!($table)));
             std::io::stdout().flush().unwrap();
-            let mut table = <$table>::with_capacity(n);
+            let mut table = <$table>::with_capacity(capacity);
             let mut rng = fastrand::Rng::with_seed(123);
             for _ in 0..n {
                 let key = rng.u64(..);
@@ -174,38 +174,39 @@ fn main() {
     for lg_mi in [15, 20, 25, 28] {
         println!("mi: 2^{lg_mi}");
         let mi = 1 << lg_mi;
-        for load_factor in [4, 5, 6, 7] {
+        for load_factor in [1, 2, 3, 4, 5, 6, 7] {
             println!("load factor: {}/8", load_factor);
             let n = mi * load_factor / 8;
+            let capacity = mi * 7 / 8;
             macro_rules! benchmark_all {
                 ($benchmark:ident) => {
                     // Our cuckoo tables fail on repeated insert_erase on high load factors. We need to extend
                     // them with BFS and rehashing support. Until then, we skip the benchmarks.
                     let is_insert_and_erase = std::stringify!($benchmark) == "benchmark_insert_and_erase";
-                    // $benchmark!(aligned_double_hashing_table::HashTable::<u64>, u64)(n);
-                    $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n);
-                    // $benchmark!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n);
+                    // $benchmark!(aligned_double_hashing_table::HashTable::<u64>, u64)(n, capacity);
+                    $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
+                    // $benchmark!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
                     // if load_factor < 7 && (!is_insert_and_erase || load_factor < 6) && lg_mi < 25 {
                     //     // This cuckoo table doesn't work for large load factors.
-                    //     $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n);
+                    //     $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     // }
-                    $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n);
-                    $benchmark!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n);
+                    $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    $benchmark!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     // if !is_insert_and_erase || load_factor < 7 {
-                    //     $benchmark!(balancing_cuckoo_table::HashTable::<u64>, u64)(n);
+                    //     $benchmark!(balancing_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     // }
-                    // $benchmark!(scalar_cache_line_aligned_table::U64HashSet::<u64>, u64)(n);
-                    // $benchmark!(scalar_unaligned_table::U64HashSet::<u64>, u64)(n);
+                    // $benchmark!(scalar_cache_line_aligned_table::U64HashSet::<u64>, u64)(n, capacity);
+                    // $benchmark!(scalar_unaligned_table::U64HashSet::<u64>, u64)(n, capacity);
                     if !is_insert_and_erase || load_factor < 6 {
-                        $benchmark!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n);
+                        $benchmark!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n, capacity);
                     }
-                    $benchmark!(hashbrown::HashMap::<u64, u64>, u64)(n);
+                    // $benchmark!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
                 }
             }
 
-            // benchmark_all!(benchmark_find_miss);
-            // benchmark_all!(benchmark_find_hit);
-            // benchmark_all!(benchmark_find_latency);
+            benchmark_all!(benchmark_find_miss);
+            benchmark_all!(benchmark_find_hit);
+            benchmark_all!(benchmark_find_latency);
             benchmark_all!(benchmark_insert_and_erase);
         }
     }
