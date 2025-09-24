@@ -19,7 +19,7 @@ mod dropper;
 mod direct_simd_cuckoo_table;
 mod control64;
 
-const ITERS: usize = 10_000_000;
+const ITERS: usize = 100_000_000;
 const TRACK_PROBE_LENGTH: bool = false;
 
 trait PrintStats {
@@ -171,6 +171,33 @@ macro_rules! benchmark_insert_and_erase {
 }
 
 fn main() {
+    {
+        let mut rng = fastrand::Rng::with_seed(123);
+        let len = 1usize << 28;
+        let mut v = (0..len).map(|i| rng.u8(..)).collect::<Vec<_>>();
+        const CACHE_LINE_SIZE: usize = 64;
+        let mut previous_nanos = 0.0;
+        for n_cache_lines in 2..=2 {
+            print!("random reads of {} cache lines: ", n_cache_lines);
+            std::io::stdout().flush().unwrap();
+            let start = Instant::now();
+            let mut xor = 0;
+            for i in 0..ITERS {
+                let first_line = ((rng.usize(..) % len) / CACHE_LINE_SIZE) * CACHE_LINE_SIZE;
+                for j in 0..n_cache_lines {
+                    xor ^= v[(first_line + j * CACHE_LINE_SIZE) % len];
+                }
+            }
+            black_box(xor);
+            let duration = start.elapsed();
+            let nanos = duration.as_nanos() as f64 / ITERS as f64;
+            let delta = nanos - previous_nanos;
+            println!("{:.2} ns/op ({:.2} ns/op incremental)", nanos, delta);
+            previous_nanos = nanos;
+        }
+        return;
+    }
+
     for lg_mi in [15, 20, 25, 28] {
         println!("mi: 2^{lg_mi}");
         let mi = 1 << lg_mi;
