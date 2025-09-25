@@ -221,7 +221,7 @@ impl<V: Copy> HashTable<V> {
         return (true, bucket_index);
 }
 
-    #[inline(always)]
+    #[inline(never)]
     pub fn get(&mut self, key: &u64) -> Option<&V> {
         let key = *key;
         let mut hash64 = fold_hash_fast(key, self.seed);
@@ -233,7 +233,7 @@ impl<V: Copy> HashTable<V> {
             let pos = hash64 as usize & self.aligned_bucket_mask;
             let group = unsafe { Group::load(self.ctrl(pos)) };
             for bit in group.match_tag(tag_hash) {
-                let index = (pos + bit) & self.bucket_mask;
+                let index = (pos + bit) & self.bucket_mask;  // TODO: bucket_mask not required, since aligned
 
                 let bucket = unsafe { self.bucket(index) };
 

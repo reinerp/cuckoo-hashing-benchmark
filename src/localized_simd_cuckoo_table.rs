@@ -18,7 +18,7 @@ pub struct HashTable<V> {
 
 const BUCKET_SIZE: usize = 7;
 
-#[repr(align(64))] // Cache line alignment
+#[repr(align(128))] // Cache line alignment
 struct Bucket<V> {
     // TODO: 1 byte "overflow" flag?
     fprints: [Tag; BUCKET_SIZE + 1],
@@ -189,7 +189,7 @@ impl<V> HashTable<V> {
         (false, (existing_bucket, existing_index))
     }
 
-    #[inline(always)]
+    #[inline(never)]
     pub fn get(&mut self, key: &u64) -> Option<&V> {
         let key = *key;
         let mut hash64 = fold_hash_fast(key, self.seed);
@@ -206,10 +206,10 @@ impl<V> HashTable<V> {
                 }
             }
 
-            // Only return None if this is the second location AND there are empty slots
-            if i == 1 {
-                return None;
-            }
+            // // Only return None if this is the second location AND there are empty slots
+            // if i == 1 {
+            //     return None;
+            // }
 
             hash64 ^= scramble_tag(tag_hash);
         }
