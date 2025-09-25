@@ -18,6 +18,7 @@ mod uunwrap;
 mod dropper;
 mod direct_simd_cuckoo_table;
 mod control64;
+mod localized_simd_cuckoo_table;
 
 const ITERS: usize = 100_000_000;
 const TRACK_PROBE_LENGTH: bool = false;
@@ -171,34 +172,33 @@ macro_rules! benchmark_insert_and_erase {
 }
 
 fn main() {
-    {
-        let mut rng = fastrand::Rng::with_seed(123);
-        let len = 1usize << 28;
-        let mut v = (0..len).map(|i| rng.u8(..)).collect::<Vec<_>>();
-        const CACHE_LINE_SIZE: usize = 64;
-        let mut previous_nanos = 0.0;
-        for n_cache_lines in 2..=2 {
-            print!("random reads of {} cache lines: ", n_cache_lines);
-            std::io::stdout().flush().unwrap();
-            let start = Instant::now();
-            let mut xor = 0;
-            for i in 0..ITERS {
-                let first_line = ((rng.usize(..) % len) / CACHE_LINE_SIZE) * CACHE_LINE_SIZE;
-                for j in 0..n_cache_lines {
-                    xor ^= v[(first_line + j * CACHE_LINE_SIZE) % len];
-                }
-            }
-            black_box(xor);
-            let duration = start.elapsed();
-            let nanos = duration.as_nanos() as f64 / ITERS as f64;
-            let delta = nanos - previous_nanos;
-            println!("{:.2} ns/op ({:.2} ns/op incremental)", nanos, delta);
-            previous_nanos = nanos;
-        }
-        return;
-    }
+    // {
+    //     let mut rng = fastrand::Rng::with_seed(123);
+    //     let len = 1usize << 28;
+    //     let mut v = (0..len).map(|i| rng.u8(..)).collect::<Vec<_>>();
+    //     const CACHE_LINE_SIZE: usize = 128;
+    //     let mut previous_nanos = 0.0;
+    //     for n_cache_lines in 1..=4 {
+    //         print!("random reads of {} cache lines: ", n_cache_lines);
+    //         std::io::stdout().flush().unwrap();
+    //         let start = Instant::now();
+    //         let mut xor = 0;
+    //         for i in 0..ITERS {
+    //             let first_line = ((rng.usize(..) % len) / CACHE_LINE_SIZE) * CACHE_LINE_SIZE;
+    //             for j in 0..n_cache_lines {
+    //                 xor ^= v[(first_line + j * CACHE_LINE_SIZE) % len];
+    //             }
+    //         }
+    //         black_box(xor);
+    //         let duration = start.elapsed();
+    //         let nanos = duration.as_nanos() as f64 / ITERS as f64;
+    //         let delta = nanos - previous_nanos;
+    //         println!("{:.2} ns/op ({:.2} ns/op incremental)", nanos, delta);
+    //         previous_nanos = nanos;
+    //     }
+    // }
 
-    for lg_mi in [15, 20, 25, 28] {
+    for lg_mi in [25] {
         println!("mi: 2^{lg_mi}");
         let mi = 1 << lg_mi;
         for load_factor in [1, 2, 3, 4, 5, 6, 7] {
@@ -211,29 +211,33 @@ fn main() {
                     // them with BFS and rehashing support. Until then, we skip the benchmarks.
                     let is_insert_and_erase = std::stringify!($benchmark) == "benchmark_insert_and_erase";
                     // $benchmark!(aligned_double_hashing_table::HashTable::<u64>, u64)(n, capacity);
-                    $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
+                    // $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
                     // $benchmark!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
                     // if load_factor < 7 && (!is_insert_and_erase || load_factor < 6) && lg_mi < 25 {
                     //     // This cuckoo table doesn't work for large load factors.
                     //     $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     // }
-                    $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-                    $benchmark!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    // $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    // $benchmark!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     // if !is_insert_and_erase || load_factor < 7 {
                     //     $benchmark!(balancing_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     // }
+                    {
+                        let n = n * 7 / 8;
+                        $benchmark!(localized_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    }
                     // $benchmark!(scalar_cache_line_aligned_table::U64HashSet::<u64>, u64)(n, capacity);
                     // $benchmark!(scalar_unaligned_table::U64HashSet::<u64>, u64)(n, capacity);
-                    if !is_insert_and_erase || load_factor < 6 {
-                        $benchmark!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n, capacity);
-                    }
+                    // if !is_insert_and_erase || load_factor < 6 {
+                    //     $benchmark!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n, capacity);
+                    // }
                     // $benchmark!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
                 }
             }
 
             benchmark_all!(benchmark_find_miss);
             benchmark_all!(benchmark_find_hit);
-            benchmark_all!(benchmark_find_latency);
+            // benchmark_all!(benchmark_find_latency);
             benchmark_all!(benchmark_insert_and_erase);
         }
     }

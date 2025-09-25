@@ -15,10 +15,14 @@ Benchmark for cuckoo hashing
 * The main issue is that it can't probe as fast: indirect SIMD probing (on 1 byte tags) can probe 8-16 values per SIMD instruction, whereas direct SIMD probing on u64 probes 2 values per SIMD instruction. 
 * Also for out-of-cache tables and find_miss/insertion it actually makes *more* cache misses because it fetches 8 bytes per key rather than 1 byte per key.
 
-**Scalar** probing is mostly an improvement on find_hit_latency, and is mostly worse on everything else.
+**Localized SIMD** probing (probe a 1-byte-tag array, but it's local to the cache line, like Folly F14) is somewhere between Direct SIMD and Indirect SIMD in performance. Better than Direct SIMD at find_miss (because we scan 7 values per cache line, not 4); better than Indirect SIMD at find_hit (because keys are on the same cache line as tags). Seems to have some instruction overhead compared to Indirect SIMD, presumably from slightly longer instruction sequences for bucket indexing.
+
+**Scalar** probing is mostly an improvement on find_hit_latency, and is mostly worse on everything else. At extremely low load factors (12.5%-25%) it can sometimes be the fastest at insertion, but not reliably so.
 * Probes are relatively slower.
 * At tables >=2^15 and load factors >4/8 we see big penalties from branch misprediction on find_hit. std::hint::select_unpredictable improves performance considerably.
 * The main advantage over Indirect SIMD, namely only one cache line per lookup, is achieved better by Direct SIMD. This applies to out-of-cache latency as well.
+
+**Cuckoo early return** is favored at tiny load factors (12.5%-50%), but becomes very unfavorable at larger load factors. I believe is because of the implied branch mispredicts.
 
 ## Overall recommendations
 
