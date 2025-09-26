@@ -198,7 +198,7 @@ fn main() {
     //     }
     // }
 
-    for lg_mi in [15, 20, 25, 28] {
+    for lg_mi in [15] {
         println!("mi: 2^{lg_mi}");
         let mi = 1 << lg_mi;
         for load_factor in [4, 5, 6, 7] {
@@ -217,7 +217,7 @@ fn main() {
                     //     // This cuckoo table doesn't work for large load factors.
                     //     $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     // }
-                    $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    // $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     // $benchmark!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     // if !is_insert_and_erase || load_factor < 7 {
                     //     $benchmark!(balancing_cuckoo_table::HashTable::<u64>, u64)(n, capacity);

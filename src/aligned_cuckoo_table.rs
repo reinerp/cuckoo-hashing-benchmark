@@ -221,7 +221,7 @@ impl<V: Copy> HashTable<V> {
         return (true, bucket_index);
 }
 
-    #[inline(never)]
+    #[inline(always)]
     pub fn get(&mut self, key: &u64) -> Option<&V> {
         let key = *key;
         let mut hash64 = fold_hash_fast(key, self.seed);

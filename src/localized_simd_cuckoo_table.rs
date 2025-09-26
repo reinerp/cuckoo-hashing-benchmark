@@ -50,7 +50,7 @@ impl<V> HashTable<V> {
         let seed = fastrand::Rng::with_seed(123).u64(..);
         Self {
             table,
-            bucket_mask: num_buckets - 1,
+            bucket_mask: (num_buckets - 1) * std::mem::size_of::<Bucket<V>>(),
             len: 0,
             seed,
             total_probe_length: 0,
@@ -72,7 +72,7 @@ impl<V> HashTable<V> {
         let (existing_bucket, existing_index) = 'existing: loop {
             // Probe first group for a match.
             let pos0 = hash64 as usize & bucket_mask;
-            let bucket0 = unsafe { self.table.get_unchecked(pos0) };
+            let bucket0 = unsafe { self.bucket(pos0) };
             assert!(Group::WIDTH == BUCKET_SIZE + 1);
             let group0 = unsafe { Group::load(bucket0.fprints.as_ptr().cast()) };
 
@@ -84,7 +84,7 @@ impl<V> HashTable<V> {
 
             // Probe second group for a match.
             let pos1 = (hash64 ^ scramble_tag(tag_hash)) as usize & self.bucket_mask;
-            let bucket1 = unsafe { self.table.get_unchecked(pos1) };
+            let bucket1 = unsafe { self.bucket(pos1) };
             let group1 = unsafe { Group::load(bucket1.fprints.as_ptr().cast()) };
             for bit in group1.match_tag(tag_hash) {
                 if likely(unsafe { *bucket1.keys.get_unchecked(bit) } == key) {
@@ -127,7 +127,7 @@ impl<V> HashTable<V> {
                 if bfs_write_pos < BFS_MAX_LEN {
                     for i in 0..N {
                         let other_pos = |pos: usize| {
-                            let tag = unsafe { *self.table.get_unchecked(pos).fprints.get_unchecked(i) };
+                            let tag = unsafe { *self.bucket(pos).fprints.get_unchecked(i) };
                             pos ^ (scramble_tag(tag) as usize & bucket_mask)
                         };
                         let other_pos0 = other_pos(pos0);
@@ -150,8 +150,8 @@ impl<V> HashTable<V> {
                 }
                 pos0 = unsafe { bfs_queue[bfs_read_pos + 0].assume_init() };
                 pos1 = unsafe { bfs_queue[bfs_read_pos + 1].assume_init() };
-                group0 = unsafe { Group::load(self.table.get_unchecked(pos0).fprints.as_ptr().cast()) };
-                group1 = unsafe { Group::load(self.table.get_unchecked(pos1).fprints.as_ptr().cast()) };
+                group0 = unsafe { Group::load(self.bucket(pos0).fprints.as_ptr().cast()) };
+                group1 = unsafe { Group::load(self.bucket(pos1).fprints.as_ptr().cast()) };
             };
             while path_index >= 2 {
                 let parent_path_index = (path_index - 2) / N;
@@ -161,12 +161,12 @@ impl<V> HashTable<V> {
 
                 // Move from parent to child.
                 unsafe {
-                    let parent_bucket = self.table.get_unchecked_mut(parent_bucket_index);
+                    let parent_bucket = self.bucket_mut(parent_bucket_index);
                     let parent_tag = parent_bucket.fprints[parent_bucket_offset];
                     let parent_key = parent_bucket.keys[parent_bucket_offset];
                     let parent_value = parent_bucket.values[parent_bucket_offset].assume_init_read();
 
-                    let child_bucket = self.table.get_unchecked_mut(bucket_index);
+                    let child_bucket = self.bucket_mut(bucket_index);
                     child_bucket.fprints[bucket_offset] = parent_tag;
                     child_bucket.keys[bucket_offset] = parent_key;
                     child_bucket.values[bucket_offset].write(parent_value);
@@ -176,7 +176,7 @@ impl<V> HashTable<V> {
                 path_index = parent_path_index;
             }
             unsafe {
-                let bucket = self.table.get_unchecked_mut(bucket_index);
+                let bucket = self.bucket_mut(bucket_index);
                 bucket.fprints[bucket_offset] = tag_hash;
                 bucket.keys[bucket_offset] = key;
                 bucket.values[bucket_offset].write(value);
@@ -184,19 +184,19 @@ impl<V> HashTable<V> {
             return (true, (bucket_index, bucket_offset));
         };
         unsafe {
-            *self.table.get_unchecked_mut(existing_bucket).values.get_unchecked_mut(existing_index).assume_init_mut() = value;
+            *self.bucket_mut(existing_bucket).values.get_unchecked_mut(existing_index).assume_init_mut() = value;
         }
         (false, (existing_bucket, existing_index))
     }
 
-    #[inline(never)]
+    #[inline(always)]
     pub fn get(&mut self, key: &u64) -> Option<&V> {
         let key = *key;
         let mut hash64 = fold_hash_fast(key, self.seed);
         let tag_hash = Tag::full(hash64);
         let bucket_mask = self.bucket_mask;
         for i in 0..2 {
-            let bucket = unsafe { self.table.get_unchecked(hash64 as usize & bucket_mask) };
+            let bucket = unsafe { self.bucket(hash64 as usize & bucket_mask) };
             assert!(Group::WIDTH == BUCKET_SIZE + 1);
             let group = unsafe { Group::load(bucket.fprints.as_ptr().cast()) };
 
@@ -221,12 +221,26 @@ impl<V> HashTable<V> {
         let (inserted, (bucket_index, bucket_offset)) = self.insert(key, value);
         if inserted {
             unsafe {
-                let bucket = self.table.get_unchecked_mut(bucket_index);
+                let bucket = self.bucket_mut(bucket_index);
                 bucket.fprints[bucket_offset] = Tag::EMPTY;
                 *bucket.keys.get_unchecked_mut(bucket_offset) = 0;
                 bucket.values.get_unchecked_mut(bucket_offset).assume_init_drop();
             }
             self.len -= 1;
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn bucket(&self, masked_position: usize) -> &Bucket<V> {
+        unsafe {
+            &*self.table.as_ptr().byte_add(masked_position)
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn bucket_mut(&mut self, masked_position: usize) -> &mut Bucket<V> {
+        unsafe {
+            &mut *self.table.as_mut_ptr().byte_add(masked_position)
         }
     }
 }
