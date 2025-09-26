@@ -23,13 +23,13 @@ Lfunc_begin10:
 
         cmeq.8b v1, v1, v0
         fmov x14, d1
-        ands x14, x14, #0x8080808080808080
+        ands x14, x14, #0x8080808080808080   <--- this isn't needed in the find_miss case
         b.eq LBB10_4
         add x16, x15, #8                <-- extra add 8
 LBB10_2:
         rbit x15, x14                   <-- we could drop this on AArch64 by counting backwards not forwards
         clz x15, x15
-        lsr x15, x15, #3
+        lsr x15, x15, #3                <-- we could avoid this by relying on correct stride
 
 
 

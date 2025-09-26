@@ -18,11 +18,12 @@ pub struct HashTable<V> {
 
 const BUCKET_SIZE: usize = 7;
 
+#[repr(C)]
 #[repr(align(128))] // Cache line alignment
 struct Bucket<V> {
+    keys: [u64; BUCKET_SIZE],
     // TODO: 1 byte "overflow" flag?
     fprints: [Tag; BUCKET_SIZE + 1],
-    keys: [u64; BUCKET_SIZE],
     values: [MaybeUninit<V>; BUCKET_SIZE],
 }
 
@@ -189,7 +190,7 @@ impl<V> HashTable<V> {
         (false, (existing_bucket, existing_index))
     }
 
-    #[inline(always)]
+    #[inline(never)]
     pub fn get(&mut self, key: &u64) -> Option<&V> {
         let key = *key;
         let mut hash64 = fold_hash_fast(key, self.seed);
@@ -200,9 +201,12 @@ impl<V> HashTable<V> {
             assert!(Group::WIDTH == BUCKET_SIZE + 1);
             let group = unsafe { Group::load(bucket.fprints.as_ptr().cast()) };
 
-            for bit in group.match_tag(tag_hash) {
-                if likely(unsafe { *bucket.keys.get_unchecked(bit) } == key) {
-                    return Some(unsafe { bucket.values.get_unchecked(bit).assume_init_ref() });
+            let matches = group.match_tag(tag_hash);
+            if matches.any_bit_set() {
+                for bit in group.match_tag(tag_hash) {
+                    if likely(unsafe { *bucket.keys.get_unchecked(bit) } == key) {
+                        return Some(unsafe { bucket.values.get_unchecked(bit).assume_init_ref() });
+                    }
                 }
             }
 
