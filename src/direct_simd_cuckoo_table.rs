@@ -7,7 +7,7 @@ use crate::{TRACK_PROBE_LENGTH, control64};
 
 pub struct HashTable<V> {
     table: Box<[Bucket<V>]>,
-    bucket_mask: usize,
+    bucket_count: usize,
     len: usize,
     zero_value: Option<V>,
     seed: u64,
@@ -31,7 +31,7 @@ impl<V> HashTable<V> {
         // TODO: integer overflow...
         let num_buckets = ((capacity * 8) / 7)
             .next_power_of_two()
-            .div_ceil(BUCKET_SIZE);
+            .div_ceil(BUCKET_SIZE) + 1;
         let table = {
             let mut v = Vec::new();
             v.resize_with(num_buckets, || Bucket {
@@ -43,7 +43,7 @@ impl<V> HashTable<V> {
         let seed = fastrand::Rng::with_seed(123).u64(..);
         Self {
             table,
-            bucket_mask: num_buckets - 1,
+            bucket_count: num_buckets,
             len: 0,
             zero_value: None,
             seed,
@@ -65,12 +65,12 @@ impl<V> HashTable<V> {
             self.zero_value = Some(value);
             return (inserted, (usize::MAX, usize::MAX));
         }
-        let bucket_mask = self.bucket_mask;
+        let bucket_count = self.bucket_count;
         let hash64 = fold_hash_fast(key, self.seed);
 
         let (existing_bucket, existing_index) = 'existing: loop {
             // Probe first group for a match.
-            let pos0 = hash64 as usize & bucket_mask;
+            let pos0 = mul_hi(hash64 as usize, bucket_count);
             let keys0 = unsafe { self.table.get_unchecked(pos0) }.keys;
 
             if let Some(index) = control64::search(key, keys0) {
@@ -78,7 +78,7 @@ impl<V> HashTable<V> {
             }
 
             // Probe second group for a match.
-            let pos1 = (hash64 ^ hash64.rotate_left(32)) as usize & self.bucket_mask;
+            let pos1 = other_pos(pos0, hash64, bucket_count);
             let keys1 = unsafe { self.table.get_unchecked(pos1) }.keys;
             if let Some(index) = control64::search(key, keys1) {
                 break 'existing (pos1, index);
@@ -119,7 +119,7 @@ impl<V> HashTable<V> {
                 if bfs_write_pos < BFS_MAX_LEN {
                     for i in 0..N {
                         let other_pos = |pos: usize, key: u64| {
-                            pos ^ (fold_hash_fast(key, seed).rotate_left(32) as usize & bucket_mask)
+                            other_pos(pos, fold_hash_fast(key, seed), bucket_count)
                         };
                         let other_pos0 = other_pos(pos0, keys0[i]);
                         let other_pos1 = other_pos(pos1, keys1[i]);
@@ -183,9 +183,10 @@ impl<V> HashTable<V> {
             return self.zero_value.as_ref();
         }
         let mut hash64 = fold_hash_fast(key, self.seed);
-        let bucket_mask = self.bucket_mask;
+        let bucket_count = self.bucket_count;
+        let mut pos = mul_hi(hash64 as usize, bucket_count);
         for i in 0..2 {
-            let bucket = unsafe { self.table.get_unchecked(hash64 as usize & bucket_mask) };
+            let bucket = unsafe { self.table.get_unchecked(pos) };
             let keys = bucket.keys;
             if let Some(index) = control64::search(key, keys) {
                 return Some(unsafe { bucket.values.get_unchecked(index).assume_init_ref() });
@@ -193,7 +194,7 @@ impl<V> HashTable<V> {
             if control64::search(0, keys).is_some() {
                 return None;
             }
-            hash64 ^= hash64.rotate_left(32);
+            pos = other_pos(pos, hash64, bucket_count);
         }
         None
     }
@@ -215,3 +216,25 @@ impl<V> HashTable<V> {
     }
 }
 
+#[inline(always)]
+fn mul_hi(a: usize, b: usize) -> usize {
+    let a = a as u128;
+    let b = b as u128;
+    ((a * b) >> 64) as usize
+}
+
+// #[inline(always)]
+// fn one_step_mod(a: usize, modulo: usize) -> usize {
+//     let (sub, overflow) = a.overflowing_sub(modulo);
+//     std::hint::select_unpredictable(overflow, a, sub)
+// }
+
+fn other_pos(pos: usize, hash: u64, bucket_count: usize) -> usize {
+    // We compute:
+    //   (pos - (hash * bucket_count)) % bucket_count
+    //
+    // This has the advantage of being idempotent.
+    let pos2 = mul_hi(hash.rotate_left(32) as usize, bucket_count);
+    let (sub, overflow) = pos2.overflowing_sub(pos);
+    std::hint::select_unpredictable(overflow, sub.wrapping_add(bucket_count), sub)
+}
