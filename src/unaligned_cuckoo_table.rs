@@ -151,56 +151,106 @@ impl<V> HashTable<V> {
             self.total_probe_length += 2;
         }
 
-        // Cuckoo loop. Loop entry invariant: (key, value, hash) has no space in prev_group and should be tried in group `hash`.
-        let mut key = key;
-        let mut value = value;
-        let mut hash = hash1;
-        let mut tag_hash = tag_hash;
-        loop {
-            let pos = hash as usize & self.bucket_mask;
-            let group = unsafe { Group::load(self.ctrl(pos)) };
-            if let Some(insert_slot) = group.match_empty().lowest_set_bit() {
-                let insert_slot = (pos + insert_slot) & self.bucket_mask;
-                unsafe { 
-                    self.set_ctrl(insert_slot, tag_hash);
-                    self.bucket(insert_slot).write((key, value));
-                    self.items += 1;
-                    insert_probe_length += 1;
-                    if TRACK_PROBE_LENGTH {
-                        self.total_insert_probe_length += insert_probe_length;
-                        self.max_insert_probe_length = self.max_insert_probe_length.max(insert_probe_length);
+        // BFS Cuckoo loop adapted for unaligned buckets.
+        // Each key can be in two different windows, so we explore both alternatives.
+        // This is similar to aligned_cuckoo_table.rs but adapted for two alternatives per key.
+        use std::mem::MaybeUninit;
+
+        const N: usize = Group::WIDTH;
+        const BFS_MAX_LEN: usize = 2 * (1 + 2*N + 2*N*N + 2*N*N*N);
+
+        let mut pos0 = pos0;
+        let mut pos1 = pos1;
+        let mut group0 = group0;
+        let mut group1 = group1;
+
+        let mut bfs_queue = [MaybeUninit::<usize>::uninit(); BFS_MAX_LEN];
+        bfs_queue[0].write(pos0);
+        bfs_queue[1].write(pos1);
+        let mut bfs_read_pos = 0;
+        let (mut path_index, mut bucket_index) = loop {
+            if let Some(empty_pos) = group0.match_empty().lowest_set_bit() {
+                break (bfs_read_pos + 0, (pos0 + empty_pos) & self.bucket_mask);
+            }
+            if let Some(empty_pos) = group1.match_empty().lowest_set_bit() {
+                break (bfs_read_pos + 1, (pos1 + empty_pos) & self.bucket_mask);
+            }
+
+            let bfs_write_pos = bfs_read_pos * 2 * N + 2;
+            if bfs_write_pos + 2 * 2 * N <= BFS_MAX_LEN {
+                // For each bucket in current two windows
+                for i in 0..N {
+                    // Current window 0
+                    let bucket_idx = (pos0 + i) & self.bucket_mask;
+                    let key = unsafe { (*self.bucket(bucket_idx)).0 };
+                    let rehash = fold_hash_fast(key, self.seed);
+                    let alt_pos0 = rehash as usize & self.bucket_mask;
+                    let alt_pos1 = rehash.rotate_left(32) as usize & self.bucket_mask;
+
+                    unsafe {
+                        *bfs_queue.get_unchecked_mut(bfs_write_pos + i * 2).write(alt_pos0);
+                        *bfs_queue.get_unchecked_mut(bfs_write_pos + i * 2 + 1).write(alt_pos1);
                     }
-                    return (true, insert_slot);
+                }
+                for i in 0..N {
+                    // Current window 1
+                    let bucket_idx = (pos1 + i) & self.bucket_mask;
+                    let key = unsafe { (*self.bucket(bucket_idx)).0 };
+                    let rehash = fold_hash_fast(key, self.seed);
+                    let alt_pos0 = rehash as usize & self.bucket_mask;
+                    let alt_pos1 = rehash.rotate_left(32) as usize & self.bucket_mask;
+
+                    unsafe {
+                        *bfs_queue.get_unchecked_mut(bfs_write_pos + 2 * N + i * 2).write(alt_pos0);
+                        *bfs_queue.get_unchecked_mut(bfs_write_pos + 2 * N + i * 2 + 1).write(alt_pos1);
+                    }
                 }
             }
-            let evict_index = self.rng.usize(..) % Group::WIDTH;
-            (key, value) = std::mem::replace(unsafe { &mut *self.bucket(pos + evict_index) }, (key, value));
-            let new_tag_hash = unsafe { *self.ctrl(pos + evict_index) };
-            unsafe { self.set_ctrl(pos + evict_index, tag_hash) };
-            hash = fold_hash_fast(key, self.seed);
-            tag_hash = new_tag_hash;
-            let evicted_group_start = hash as usize & self.bucket_mask;
-            if evict_index.wrapping_sub(evicted_group_start) & self.bucket_mask < Group::WIDTH {
-                hash = hash.rotate_left(32);
-                // We evict from its first location and move to its second location.
-                if TRACK_PROBE_LENGTH {
-                    self.total_probe_length += 1;
-                }
-            } else {
-                // We evict from its second location and move to its first location.
-                if TRACK_PROBE_LENGTH {
-                    self.total_probe_length -= 1;
-                }
+
+            bfs_read_pos += 2;
+
+            if bfs_read_pos + 2 > BFS_MAX_LEN {
+                panic!("Failed to insert into cuckoo table; need to rehash");
             }
-            insert_probe_length += 1;
-            // loop_count += 1;
-            // if loop_count > 1000 {
-            //     println!("Loop: key={key:x}, pos={pos:x}, hash={hash:x}");
-            //     if loop_count > 120 {
-            //         panic!();
-            //     }
-            // }
-            // TODO: panic and rehash on loop.
+            pos0 = unsafe { bfs_queue[bfs_read_pos + 0].assume_init() };
+            pos1 = unsafe { bfs_queue[bfs_read_pos + 1].assume_init() };
+            group0 = unsafe { Group::load(self.ctrl(pos0)) };
+            group1 = unsafe { Group::load(self.ctrl(pos1)) };
+        };
+
+        // Backtrack from the empty slot to the root, moving keys along the path
+        while path_index >= 2 {
+            let parent_path_index = (path_index - 2) / (2 * N);
+            let parent_bucket_offset = (path_index - 2) % (2 * N);
+
+            let parent_window_index = parent_bucket_offset / (2 * N);
+            let parent_bucket_in_window = (parent_bucket_offset % N) / 2;
+
+            let parent_pos = unsafe { bfs_queue.get_unchecked(parent_path_index + parent_window_index).assume_init() };
+            let parent_bucket_index = (parent_pos + parent_bucket_in_window) & self.bucket_mask;
+
+            // Move from parent to child
+            unsafe {
+                let parent_kv = self.bucket(parent_bucket_index).read();
+                let parent_tag = *self.ctrl(parent_bucket_index);
+                self.bucket(bucket_index).write(parent_kv);
+                self.set_ctrl(bucket_index, parent_tag);
+            }
+
+            bucket_index = parent_bucket_index;
+            path_index = parent_path_index + parent_window_index;
+        }
+
+        unsafe {
+            self.bucket(bucket_index).write((key, value));
+            self.set_ctrl(bucket_index, tag_hash);
+            self.items += 1;
+            insert_probe_length += path_index + 1;
+            if TRACK_PROBE_LENGTH {
+                self.total_insert_probe_length += insert_probe_length;
+                self.max_insert_probe_length = self.max_insert_probe_length.max(insert_probe_length);
+            }
+            return (true, bucket_index);
         }
     }
 
