@@ -8,6 +8,7 @@ Benchmark for cuckoo hashing
 * TODO: BFS loop should be "hash then search", not "search then hash". That avoids redundant hashing operations.
 * For huge tables (out-of-cache, out-of-TLB), insertion is a little slower.
 * Cuckoo actually has *faster* insertion than non-cuckoo, with advantage growing as load factor increases. This relies on being able to compute the "alternative" cuckoo bucket from just the tag array, as is possible with the `base_hash ^ hash(tag)` approach.
+* Unaligned cuckoo hashing seems beneficial, but I haven't implemented an efficient BFS for it, so I don't yet have efficient insertion at high load factors.
 
 **Indirect SIMD** probing works really well at large load factors, where it improves almost everything. 
 
@@ -44,11 +45,13 @@ string keys (and other large keys):
 Overall flowchart:
 * Do you need fast union/intersect operations between multiple tables?
   * Then use Robin Hood hashing, to support traversals ordered by hash.
-* Do you very strongly prioritize time over memory footprint? (More precisely: do you tolerate ~7x memory footprint for ~1.25x speedup?)
+* Do you extremely prioritize time over memory footprint? (Do you tolerate ~7x memory footprint for ~1.25x speedup?)
   * Then use scalar probing with 12.5% load factor.
+* Is the table entirely in cache (up to ~1000 entries, table accessed in a high-iteration-count loop)
+  * Then use unaligned cuckoo hashing with Indirect SIMD
 * Are most operations "lookup hits", i.e. on keys that are already in the table?
   * Does it have integer-like keys (fixed-size 4-8 byte keys)?
-    * Then use cuckoo hashing with Direct SIMD.
+    * Then use (aligned) cuckoo hashing with Direct SIMD.
   * Does it have string-like keys (variable-length payloads, behind a pointer)?
-    * The using cuckoo hashing with Localized SIMD.
-* Otherwise, use cuckoo hashing with Indirect SIMD.
+    * The using (aligned) cuckoo hashing with Localized SIMD.
+* Otherwise, use unaligned cuckoo hashing with Indirect SIMD.

@@ -190,7 +190,7 @@ impl<V> HashTable<V> {
         (false, (existing_bucket, existing_index))
     }
 
-    #[inline(never)]
+    #[inline(always)]
     pub fn get(&mut self, key: &u64) -> Option<&V> {
         let key = *key;
         let mut hash64 = fold_hash_fast(key, self.seed);
@@ -209,6 +209,10 @@ impl<V> HashTable<V> {
                     }
                 }
             }
+
+            // if i == 1 || group.match_empty().any_bit_set() {
+            //     return None;
+            // }
 
             // // Only return None if this is the second location AND there are empty slots
             // if i == 1 {

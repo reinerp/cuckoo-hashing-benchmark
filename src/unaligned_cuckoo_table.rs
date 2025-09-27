@@ -236,7 +236,7 @@ impl<V> HashTable<V> {
                 }
             }
             // TODO(reiner): possibly skip early return here. The early return prevents deletions.
-            if is_second_group || group.match_empty().any_bit_set() {
+            if is_second_group || (false && group.match_empty().any_bit_set()) {
                 return None;
             }
             hash64 = hash64.rotate_left(32);
