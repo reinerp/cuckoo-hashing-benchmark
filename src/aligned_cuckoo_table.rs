@@ -329,3 +329,268 @@ fn scramble_tag(tag: Tag) -> u64 {
 }
 
 const MUL: u64 = 0x2d35_8dcc_aa6c_78a5;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_basic_insert_and_get() {
+        let mut table = HashTable::with_capacity(16);
+
+        // Test basic insertion
+        let (inserted, _) = table.insert(42, 100);
+        assert!(inserted);
+        assert_eq!(table.len(), 1);
+
+        // Test retrieval
+        assert_eq!(table.get(&42), Some(&100));
+        assert_eq!(table.get(&999), None);
+    }
+
+    #[test]
+    fn test_update_existing() {
+        let mut table = HashTable::with_capacity(16);
+
+        // Insert initial value
+        let (inserted, _) = table.insert(123, 456);
+        assert!(inserted);
+        assert_eq!(table.len(), 1);
+
+        // Update with new value
+        let (inserted, _) = table.insert(123, 789);
+        assert!(!inserted); // Should be false since key already existed
+        assert_eq!(table.len(), 1); // Length should remain the same
+
+        // Verify updated value
+        assert_eq!(table.get(&123), Some(&789));
+    }
+
+    #[test]
+    fn test_multiple_insertions() {
+        let mut table = HashTable::with_capacity(64);
+
+        // Insert multiple values
+        for i in 1..=20 {
+            let (inserted, _) = table.insert(i, i * 10);
+            assert!(inserted);
+        }
+
+        assert_eq!(table.len(), 20);
+
+        // Verify all values
+        for i in 1..=20 {
+            assert_eq!(table.get(&i), Some(&(i * 10)));
+        }
+    }
+
+    #[test]
+    fn test_cross_check_with_std_hashmap_small() {
+        let mut cuckoo_table = HashTable::with_capacity(32);
+        let mut std_map = HashMap::new();
+
+        let keys = [1, 5, 10, 15, 20, 25, 30, 35];
+
+        // Insert same data into both
+        for &key in &keys {
+            let value = key * 2;
+            cuckoo_table.insert(key, value);
+            std_map.insert(key, value);
+        }
+
+        // Verify both have same length
+        assert_eq!(cuckoo_table.len(), std_map.len());
+
+        // Verify all lookups match
+        for &key in &keys {
+            assert_eq!(cuckoo_table.get(&key).copied(), std_map.get(&key).copied());
+        }
+
+        // Test non-existent keys
+        for &key in &[2, 7, 12, 99] {
+            assert_eq!(cuckoo_table.get(&key), None);
+            assert_eq!(std_map.get(&key), None);
+        }
+    }
+
+    #[test]
+    fn test_randomized_small() {
+        let mut rng = fastrand::Rng::with_seed(12345);
+        let mut cuckoo_table = HashTable::with_capacity(128);
+        let mut std_map = HashMap::new();
+
+        // Random insertions
+        for _ in 0..50 {
+            let key = rng.u64(1..1000); // Avoid key 0 for simplicity
+            let value = rng.u64(..);
+
+            let cuckoo_result = cuckoo_table.insert(key, value);
+            let std_existed = std_map.insert(key, value).is_some();
+
+            // Check insertion result consistency
+            assert_eq!(cuckoo_result.0, !std_existed);
+        }
+
+        // Verify lengths match
+        assert_eq!(cuckoo_table.len(), std_map.len());
+
+        // Verify all lookups match
+        for &key in std_map.keys() {
+            assert_eq!(cuckoo_table.get(&key).copied(), std_map.get(&key).copied());
+        }
+    }
+
+    #[test]
+    fn test_randomized_medium() {
+        let mut rng = fastrand::Rng::with_seed(67890);
+        let mut cuckoo_table = HashTable::with_capacity(512);
+        let mut std_map = HashMap::new();
+
+        // Random insertions and updates
+        for _ in 0..200 {
+            let key = rng.u64(1..500);
+            let value = rng.u64(..);
+
+            let cuckoo_result = cuckoo_table.insert(key, value);
+            let std_existed = std_map.insert(key, value).is_some();
+
+            assert_eq!(cuckoo_result.0, !std_existed);
+        }
+
+        assert_eq!(cuckoo_table.len(), std_map.len());
+
+        // Random lookups - both existing and non-existing keys
+        for _ in 0..100 {
+            let key = rng.u64(1..1000);
+            assert_eq!(cuckoo_table.get(&key).copied(), std_map.get(&key).copied());
+        }
+    }
+
+    #[test]
+    fn test_collision_handling() {
+        let mut table = HashTable::with_capacity(8); // Small table to force collisions
+
+        // Insert many values that may hash to similar locations
+        let test_keys = [
+            0x1000_0000_0000_0001,
+            0x2000_0000_0000_0002,
+            0x3000_0000_0000_0003,
+            0x4000_0000_0000_0004,
+            0x5000_0000_0000_0005,
+        ];
+
+        for &key in &test_keys {
+            let (inserted, _) = table.insert(key, key);
+            assert!(inserted);
+        }
+
+        // Verify all keys can be retrieved
+        for &key in &test_keys {
+            assert_eq!(table.get(&key), Some(&key));
+        }
+    }
+
+    #[test]
+    fn test_capacity_stress() {
+        let mut cuckoo_table = HashTable::with_capacity(64);
+        let mut std_map = HashMap::new();
+        let mut rng = fastrand::Rng::with_seed(42);
+
+        // Fill to reasonable capacity (cuckoo hashing typically works well up to ~90% load)
+        let num_items = 45; // About 70% of capacity
+
+        for _ in 0..num_items {
+            let key = loop {
+                let k = rng.u64(1..u64::MAX);
+                if !std_map.contains_key(&k) { break k; }
+            };
+            let value = rng.u64(..);
+
+            cuckoo_table.insert(key, value);
+            std_map.insert(key, value);
+        }
+
+        assert_eq!(cuckoo_table.len(), std_map.len());
+        assert_eq!(cuckoo_table.len(), num_items);
+
+        // Verify all insertions
+        for (&key, &expected_value) in &std_map {
+            assert_eq!(cuckoo_table.get(&key), Some(&expected_value));
+        }
+    }
+
+    #[test]
+    fn test_update_pattern() {
+        let mut cuckoo_table = HashTable::with_capacity(32);
+        let mut std_map = HashMap::new();
+
+        // Insert initial values
+        for i in 1..=10 {
+            cuckoo_table.insert(i, i);
+            std_map.insert(i, i);
+        }
+
+        // Update all values multiple times
+        for round in 1..=3 {
+            for i in 1..=10 {
+                let new_value = i * 100 * round;
+                let (cuckoo_inserted, _) = cuckoo_table.insert(i, new_value);
+                let std_existed = std_map.insert(i, new_value).is_some();
+
+                assert!(!cuckoo_inserted); // Should be update, not insert
+                assert!(std_existed); // Should be update, not insert
+            }
+
+            // Verify all updates
+            for i in 1..=10 {
+                let expected = i * 100 * round;
+                assert_eq!(cuckoo_table.get(&i), Some(&expected));
+                assert_eq!(std_map.get(&i), Some(&expected));
+            }
+        }
+    }
+
+    #[test]
+    fn test_mixed_operations_randomized() {
+        let mut rng = fastrand::Rng::with_seed(13579);
+        let mut cuckoo_table = HashTable::with_capacity(256);
+        let mut std_map = HashMap::new();
+
+        // Mixed operations: inserts, updates, lookups
+        for _ in 0..300 {
+            let operation = rng.u32(0..3);
+
+            match operation {
+                0 => {
+                    // Insert/Update
+                    let key = rng.u64(1..200);
+                    let value = rng.u64(..);
+
+                    let cuckoo_result = cuckoo_table.insert(key, value);
+                    let std_existed = std_map.insert(key, value).is_some();
+                    assert_eq!(cuckoo_result.0, !std_existed);
+                }
+                1 => {
+                    // Lookup existing key
+                    if let Some(&key) = std_map.keys().next() {
+                        assert_eq!(cuckoo_table.get(&key).copied(), std_map.get(&key).copied());
+                    }
+                }
+                2 => {
+                    // Lookup random key (may or may not exist)
+                    let key = rng.u64(1..300);
+                    assert_eq!(cuckoo_table.get(&key).copied(), std_map.get(&key).copied());
+                }
+                _ => unreachable!()
+            }
+        }
+
+        // Final consistency check
+        assert_eq!(cuckoo_table.len(), std_map.len());
+
+        for (&key, &value) in &std_map {
+            assert_eq!(cuckoo_table.get(&key), Some(&value));
+        }
+    }
+}

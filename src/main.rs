@@ -327,7 +327,7 @@ fn main() {
     //     }
     // }
 
-    for lg_mi in [15] {  // Focus on 2^15 for fast testing
+    for lg_mi in [15, 25] {  // Focus on 2^15 for fast testing
         println!("mi: 2^{lg_mi}");
         let mi = 1 << lg_mi;
         for load_factor in [16, 24, 28] {  // Use a single moderate load factor
@@ -340,12 +340,12 @@ fn main() {
                     // them with BFS and rehashing support. Until then, we skip the benchmarks.
                     let is_insert_and_erase = std::stringify!($benchmark) == "benchmark_insert_and_erase";
                     // $benchmark!(aligned_double_hashing_table::HashTable::<u64>, u64)(n, capacity);
-                    $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
+                    // $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
                     // $benchmark!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
-                    $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    // $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-                    $benchmark!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-                    $benchmark!(direct_simd_quadratic_probing::HashTable::<u64>, u64)(n, capacity);
+                    // $benchmark!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    // $benchmark!(direct_simd_quadratic_probing::HashTable::<u64>, u64)(n, capacity);
                     // if !is_insert_and_erase || load_factor < 7 {
                     //     $benchmark!(balancing_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     // }
@@ -366,10 +366,10 @@ fn main() {
             // benchmark_all!(benchmark_find_miss);
             // benchmark_all!(benchmark_find_hit);
             // benchmark_all!(benchmark_find_latency);
-            // benchmark_all!(benchmark_insert_and_erase);
+            benchmark_all!(benchmark_insert_and_erase);
 
             // Run the probe histogram benchmark
-            benchmark_all!(benchmark_probe_histogram);
+            // benchmark_all!(benchmark_probe_histogram);
         }
     }
 }
