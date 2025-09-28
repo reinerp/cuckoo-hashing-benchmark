@@ -44,6 +44,12 @@ fn drop_spaces(s: &str) -> String {
     s.split_whitespace().collect()
 }
 
+#[inline(always)]
+fn mul_high_u64(x: u64, y: u64) -> u64 {
+    let r = (x as u128) * (y as u128);
+    (r >> 64) as u64
+}
+
 macro_rules! benchmark_find_miss {
     ($table:ty, $v:ty) => {
         (|n: usize, capacity: usize| {
@@ -86,7 +92,8 @@ macro_rules! benchmark_find_hit {
             let start = Instant::now();
             let mut found = 0;
             for _ in 0..ITERS {
-                let key = rng.u64(..) & n_ish_mask;
+                // let key = rng.u64(..) & n_ish_mask;
+                let key = mul_high_u64(rng.u64(..), n as u64);
                 found += table.get(&key).is_some() as usize;
             }
             black_box(found);
@@ -198,9 +205,9 @@ fn main() {
     for lg_mi in [15, 25] {
         println!("mi: 2^{lg_mi}");
         let mi = 1 << lg_mi;
-        for load_factor in [4, 5, 6, 7] {
-            println!("load factor: {}/8", load_factor);
-            let n = mi * load_factor / 8;
+        for load_factor in [16, 20, 24, 28, 30] {
+            println!("load factor: {:.1}%", load_factor as f64 / 32.0 * 100.0);
+            let n = mi * load_factor / 32;
             let capacity = mi * 7 / 8;
             macro_rules! benchmark_all {
                 ($benchmark:ident) => {
@@ -208,11 +215,11 @@ fn main() {
                     // them with BFS and rehashing support. Until then, we skip the benchmarks.
                     let is_insert_and_erase = std::stringify!($benchmark) == "benchmark_insert_and_erase";
                     // $benchmark!(aligned_double_hashing_table::HashTable::<u64>, u64)(n, capacity);
-                    $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
+                    // $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
                     // $benchmark!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
                     // if load_factor < 7 && (!is_insert_and_erase || load_factor < 6) && lg_mi < 25 {
                     //     // This cuckoo table doesn't work for large load factors.
-                        $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                        // $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     // }
                     // $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     $benchmark!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
@@ -233,10 +240,11 @@ fn main() {
                 }
             }
 
-            benchmark_all!(benchmark_find_miss);
-            // benchmark_all!(benchmark_find_hit);
+            // benchmark_all!(benchmark_find_miss);
+            benchmark_all!(benchmark_find_hit);
             // benchmark_all!(benchmark_find_latency);
             // benchmark_all!(benchmark_insert_and_erase);
         }
     }
 }
+
