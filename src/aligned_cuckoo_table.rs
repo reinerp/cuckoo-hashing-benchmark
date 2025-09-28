@@ -261,6 +261,38 @@ impl<V: Copy> HashTable<V> {
         }
     }
 
+    pub fn probe_length(&self, key: u64) -> (usize, bool) {
+        let mut hash64 = fold_hash_fast(key, self.seed);
+        let tag_hash = Tag::full(hash64);
+        let mut probe_count = 0;
+
+        // First group
+        loop {
+            probe_count += 1;
+            let pos = hash64 as usize & self.aligned_bucket_mask;
+            let group = unsafe { Group::load(self.ctrl(pos)) };
+
+            for bit in group.match_tag(tag_hash) {
+                let index = (pos + bit) & self.bucket_mask;
+                let bucket = unsafe { self.bucket(index) };
+                if unsafe { (*bucket).0 } == key {
+                    return (probe_count, true); // Key found
+                }
+            }
+
+            if group.match_empty().any_bit_set() {
+                return (probe_count, false); // Empty slot found, key absent
+            }
+
+            if probe_count >= 2 {
+                return (probe_count, false); // After checking both groups, key absent
+            }
+
+            let tag64 = scramble_tag(tag_hash);
+            hash64 = hash64 ^ tag64;
+        }
+    }
+
     #[inline(always)]
     pub unsafe fn erase_index(&mut self, index: usize) {
         let index_before = index.wrapping_sub(Group::WIDTH) & self.bucket_mask;

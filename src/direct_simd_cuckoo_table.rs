@@ -209,6 +209,36 @@ impl<V> HashTable<V> {
         result.map(|(mask, bucket, stride)| unsafe { bucket.values.get_unchecked(mask.trailing_zeros() as usize / stride).assume_init_ref() })
     }
 
+    pub fn probe_length(&self, key: u64) -> (usize, bool) {
+        if key == 0 {
+            return (1, self.zero_value.is_some()); // Zero key is always in first probe
+        }
+
+        let mut hash64 = fold_hash_fast(key, self.seed);
+        let bucket_mask = self.bucket_mask;
+
+        for i in 0..2 {
+            let bucket = unsafe { self.table.get_unchecked(hash64 as usize & bucket_mask) };
+            let keys = bucket.keys;
+            let (mask, stride) = control64::search_mask(key, keys);
+
+            if mask != 0 {
+                return (i + 1, true); // Key found at probe i+1
+            }
+
+            // Check if there are any empty slots in this bucket (key == 0)
+            let (empty_mask, _) = control64::search_mask(0, keys);
+            if empty_mask != 0 {
+                return (i + 1, false); // Empty slot found, key absent
+            }
+
+            hash64 ^= hash64.rotate_left(32);
+        }
+
+        // Both buckets are full but key not found
+        (2, false)
+    }
+
     #[inline(always)]
     pub fn insert_and_erase(&mut self, key: u64, value: V) {
         let (inserted, (bucket_index, bucket_offset)) = self.insert(key, value);

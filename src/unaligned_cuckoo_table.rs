@@ -278,9 +278,9 @@ impl<V> HashTable<V> {
             let group = unsafe { Group::load(self.ctrl(pos)) };
             for bit in group.match_tag(tag_hash) {
                 let index = (pos + bit) & self.bucket_mask;
-    
+
                 let bucket = unsafe { self.bucket(index) };
-    
+
                 if unsafe { (*bucket).0 } == key {
                     return Some(unsafe { &(*bucket).1 });
                 }
@@ -306,6 +306,37 @@ impl<V> HashTable<V> {
         //     }
         // }
         // None
+    }
+
+    pub fn probe_length(&self, key: u64) -> (usize, bool) {
+        let mut hash64 = fold_hash_fast(key, self.seed);
+        let tag_hash = Tag::full(hash64);
+        let mut probe_count = 0;
+
+        // First group
+        loop {
+            probe_count += 1;
+            let pos = hash64 as usize & self.bucket_mask;
+            let group = unsafe { Group::load(self.ctrl(pos)) };
+
+            for bit in group.match_tag(tag_hash) {
+                let index = (pos + bit) & self.bucket_mask;
+                let bucket = unsafe { self.bucket(index) };
+                if unsafe { (*bucket).0 } == key {
+                    return (probe_count, true); // Key found
+                }
+            }
+
+            if group.match_empty().any_bit_set() {
+                return (probe_count, false); // Empty slot found, key absent
+            }
+
+            if probe_count >= 2 {
+                return (probe_count, false); // After checking both groups, key absent
+            }
+
+            hash64 = hash64.rotate_left(32);
+        }
     }
 
     #[inline(always)]

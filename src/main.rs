@@ -40,6 +40,52 @@ impl InsertAndErase for hashbrown::HashMap<u64, u64> {
     }
 }
 
+trait ProbeLength {
+    fn probe_length(&self, key: u64) -> (usize, bool) {
+        (1, false) // Default dummy implementation
+    }
+}
+
+impl ProbeLength for hashbrown::HashMap<u64, u64> {}
+impl ProbeLength for aligned_double_hashing_table::HashTable<u64> {}
+impl ProbeLength for aligned_quadratic_probing_table::HashTable<u64> {}
+impl ProbeLength for balancing_cuckoo_table::HashTable<u64> {}
+impl ProbeLength for scalar_cache_line_aligned_table::U64HashSet<u64> {}
+impl ProbeLength for scalar_unaligned_table::U64HashSet<u64> {}
+impl ProbeLength for scalar_cuckoo_table::U64HashSet<u64> {}
+impl ProbeLength for localized_simd_cuckoo_table::HashTable<u64> {}
+
+// Real implementations for tables that have proper probe_length methods
+impl ProbeLength for aligned_cuckoo_table::HashTable<u64> {
+    fn probe_length(&self, key: u64) -> (usize, bool) {
+        self.probe_length(key)
+    }
+}
+
+impl ProbeLength for unaligned_cuckoo_table::HashTable<u64> {
+    fn probe_length(&self, key: u64) -> (usize, bool) {
+        self.probe_length(key)
+    }
+}
+
+impl ProbeLength for direct_simd_cuckoo_table::HashTable<u64> {
+    fn probe_length(&self, key: u64) -> (usize, bool) {
+        self.probe_length(key)
+    }
+}
+
+impl ProbeLength for quadratic_probing_table::HashTable<u64> {
+    fn probe_length(&self, key: u64) -> (usize, bool) {
+        self.probe_length(key)
+    }
+}
+
+impl ProbeLength for direct_simd_quadratic_probing::HashTable<u64> {
+    fn probe_length(&self, key: u64) -> (usize, bool) {
+        self.probe_length(key)
+    }
+}
+
 fn drop_spaces(s: &str) -> String {
     s.split_whitespace().collect()
 }
@@ -84,16 +130,16 @@ macro_rules! benchmark_find_hit {
             std::io::stdout().flush().unwrap();
             let mut table = <$table>::with_capacity(capacity);
             let mut rng = fastrand::Rng::with_seed(123);
-            for i in 0..n {
-                let key = rng.u64(..);
-                table.insert(i as u64, <$v>::default());
+            let mut keys = (0..n).map(|i| i as u64).collect::<Vec<_>>();
+            keys.shuffle(&mut rng);
+            for key in keys {
+                table.insert(key, <$v>::default());
             }
             let n_ish_mask = ((n.next_power_of_two() / 2) - 1) as u64;
             let start = Instant::now();
             let mut found = 0;
             for _ in 0..ITERS {
-                // let key = rng.u64(..) & n_ish_mask;
-                let key = mul_high_u64(rng.u64(..), n as u64);
+                let key = rng.u64(..) & n_ish_mask;
                 found += table.get(&key).is_some() as usize;
             }
             black_box(found);
@@ -175,6 +221,85 @@ macro_rules! benchmark_insert_and_erase {
     };
 }
 
+macro_rules! benchmark_probe_histogram {
+    ($table:ty, $v:ty) => {
+        (|n: usize, capacity: usize| {
+            println!("probe_histogram  {}/{n}:", drop_spaces(stringify!($table)));
+            let mut table = <$table>::with_capacity(capacity);
+            let mut rng = fastrand::Rng::with_seed(123);
+
+            // Insert keys same way as find_hit to get consistent results
+            let mut keys = (0..n).map(|i| i as u64).collect::<Vec<_>>();
+            rng.shuffle(&mut keys);
+            for key in keys {
+                table.insert(key, <$v>::default());
+            }
+
+            // Build histograms
+            let mut present_histogram = std::collections::HashMap::new();
+            let mut absent_histogram = std::collections::HashMap::new();
+
+            let n_ish_mask = ((n.next_power_of_two() / 2) - 1) as u64;
+
+            // Sample present keys
+            for key in 0..n as u64 {
+                let (probe_length, found) = table.probe_length(key);
+                // assert!(found);
+                *present_histogram.entry(probe_length).or_insert(0) += 1;
+            }
+
+            // Sample absent keys
+            let mut rng_absent = fastrand::Rng::with_seed(456);
+            for _ in 0..n {
+                let key = rng_absent.u64(..);
+                let (probe_length, found) = table.probe_length(key);
+                if !found {
+                    *absent_histogram.entry(probe_length).or_insert(0) += 1;
+                }
+            }
+
+            // Calculate average probe lengths
+            let present_total_probes: usize = present_histogram.iter()
+                .map(|(length, count)| length * count)
+                .sum();
+            let present_total_count: usize = present_histogram.values().sum();
+            let present_avg = if present_total_count > 0 {
+                present_total_probes as f64 / present_total_count as f64
+            } else { 0.0 };
+
+            let absent_total_probes: usize = absent_histogram.iter()
+                .map(|(length, count)| length * count)
+                .sum();
+            let absent_total_count: usize = absent_histogram.values().sum();
+            let absent_avg = if absent_total_count > 0 {
+                absent_total_probes as f64 / absent_total_count as f64
+            } else { 0.0 };
+
+            // Print averages
+            println!("  Average probe lengths:");
+            println!("    Present keys: {:.3}", present_avg);
+            println!("    Absent keys:  {:.3}", absent_avg);
+
+            // Print histograms
+            println!("  Present key probe lengths:");
+            let mut present_keys: Vec<_> = present_histogram.keys().cloned().collect();
+            present_keys.sort();
+            for probe_length in present_keys {
+                let count = present_histogram[&probe_length];
+                println!("    {}: {}", probe_length, count);
+            }
+
+            println!("  Absent key probe lengths:");
+            let mut absent_keys: Vec<_> = absent_histogram.keys().cloned().collect();
+            absent_keys.sort();
+            for probe_length in absent_keys {
+                let count = absent_histogram[&probe_length];
+                println!("    {}: {}", probe_length, count);
+            }
+        })
+    };
+}
+
 fn main() {
     // {
     //     let mut rng = fastrand::Rng::with_seed(123);
@@ -202,10 +327,10 @@ fn main() {
     //     }
     // }
 
-    for lg_mi in [15, 25] {
+    for lg_mi in [15] {  // Focus on 2^15 for fast testing
         println!("mi: 2^{lg_mi}");
         let mi = 1 << lg_mi;
-        for load_factor in [16, 20, 24, 28, 30] {
+        for load_factor in [16, 24, 28] {  // Use a single moderate load factor
             println!("load factor: {:.1}%", load_factor as f64 / 32.0 * 100.0);
             let n = mi * load_factor / 32;
             let capacity = mi * 7 / 8;
@@ -215,13 +340,10 @@ fn main() {
                     // them with BFS and rehashing support. Until then, we skip the benchmarks.
                     let is_insert_and_erase = std::stringify!($benchmark) == "benchmark_insert_and_erase";
                     // $benchmark!(aligned_double_hashing_table::HashTable::<u64>, u64)(n, capacity);
-                    // $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
+                    $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
                     // $benchmark!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
-                    // if load_factor < 7 && (!is_insert_and_erase || load_factor < 6) && lg_mi < 25 {
-                    //     // This cuckoo table doesn't work for large load factors.
-                        // $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-                    // }
-                    // $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     $benchmark!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     $benchmark!(direct_simd_quadratic_probing::HashTable::<u64>, u64)(n, capacity);
                     // if !is_insert_and_erase || load_factor < 7 {
@@ -240,10 +362,14 @@ fn main() {
                 }
             }
 
+            // Disable other benchmarks for now, focus on probe histogram
             // benchmark_all!(benchmark_find_miss);
-            benchmark_all!(benchmark_find_hit);
+            // benchmark_all!(benchmark_find_hit);
             // benchmark_all!(benchmark_find_latency);
             // benchmark_all!(benchmark_insert_and_erase);
+
+            // Run the probe histogram benchmark
+            benchmark_all!(benchmark_probe_histogram);
         }
     }
 }

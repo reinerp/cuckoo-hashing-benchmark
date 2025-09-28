@@ -183,6 +183,37 @@ impl<V> HashTable<V> {
         }
     }
 
+    pub fn probe_length(&self, key: u64) -> (usize, bool) {
+        if key == 0 {
+            return (1, self.zero_value.is_some()); // Zero key is always in first probe
+        }
+
+        let hash64 = fold_hash_fast(key, self.seed);
+        let mut probe_seq = self.probe_seq(hash64);
+        let mut probe_count = 0;
+
+        loop {
+            probe_count += 1;
+            let bucket = unsafe { self.table.get_unchecked(probe_seq.pos) };
+            let keys = bucket.keys;
+
+            // Check if key exists in this bucket using SIMD
+            let (mask, stride) = control64::search_mask(key, keys);
+            if mask != 0 {
+                return (probe_count, true); // Key found
+            }
+
+            // Check if there are any empty slots in this bucket
+            let (empty_mask, _) = control64::search_mask(0, keys);
+            if empty_mask != 0 {
+                return (probe_count, false); // Empty slot found, key absent
+            }
+
+            // Continue probing
+            probe_seq.move_next(self.bucket_mask);
+        }
+    }
+
     #[inline(always)]
     pub fn insert_and_erase(&mut self, key: u64, value: V) {
         let (inserted, (bucket_index, bucket_offset)) = self.insert(key, value);
