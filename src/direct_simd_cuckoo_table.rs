@@ -68,20 +68,22 @@ impl<V> HashTable<V> {
         let bucket_mask = self.bucket_mask;
         let hash64 = fold_hash_fast(key, self.seed);
 
-        let (existing_bucket, existing_index) = 'existing: loop {
+        let (existing_bucket, existing_mask, stride) = 'existing: loop {
             // Probe first group for a match.
             let pos0 = hash64 as usize & bucket_mask;
             let keys0 = unsafe { self.table.get_unchecked(pos0) }.keys;
 
-            if let Some(index) = control64::search(key, keys0) {
-                break 'existing (pos0, index);
+            let (mask, stride) = control64::search_mask(key, keys0);
+            if mask != 0 {
+                break 'existing (pos0, mask, stride);
             }
 
             // Probe second group for a match.
             let pos1 = (hash64 ^ hash64.rotate_left(32)) as usize & self.bucket_mask;
             let keys1 = unsafe { self.table.get_unchecked(pos1) }.keys;
-            if let Some(index) = control64::search(key, keys1) {
-                break 'existing (pos1, index);
+            let (mask, stride) = control64::search_mask(key, keys1);
+            if mask != 0 {
+                break 'existing (pos1, mask, stride);
             }
 
             // No match. We're going to insert; do BFS cuckoo loop.
@@ -107,12 +109,14 @@ impl<V> HashTable<V> {
             bfs_queue[0].write(pos0);
             bfs_queue[1].write(pos1);
             let mut bfs_read_pos = 0;
-            let (mut path_index, mut bucket_index, mut bucket_offset) = 'bfs: loop {
-                if let Some(empty_pos) = control64::search(0, keys0) {
-                    break 'bfs (bfs_read_pos + 0, pos0, empty_pos);
+            let (mut path_index, mut bucket_index, mut bucket_mask, stride) = 'bfs: loop {
+                let (mask, stride) = control64::search_mask(0, keys0);
+                if mask != 0 {
+                    break 'bfs (bfs_read_pos + 0, pos0, mask, stride);
                 }
-                if let Some(empty_pos) = control64::search(0, keys1) {
-                    break 'bfs (bfs_read_pos + 1, pos1, empty_pos);
+                let (mask, stride) = control64::search_mask(0, keys1);
+                if mask != 0 {
+                    break 'bfs (bfs_read_pos + 1, pos1, mask, stride);
                 }
 
                 let bfs_write_pos = bfs_read_pos * N + 2;
@@ -144,6 +148,7 @@ impl<V> HashTable<V> {
                 keys0 = unsafe { self.table.get_unchecked(pos0) }.keys;
                 keys1 = unsafe { self.table.get_unchecked(pos1) }.keys;
             };
+            let mut bucket_offset = bucket_mask.trailing_zeros() as usize / stride;
             while path_index >= 2 {
                 let parent_path_index = (path_index - 2) / N;
                 let parent_bucket_offset = (path_index - 2) % N;
@@ -170,6 +175,7 @@ impl<V> HashTable<V> {
             }
             return (true, (bucket_index, bucket_offset));
         };
+        let existing_index = existing_mask.trailing_zeros() as usize / stride;
         unsafe {
             *self.table.get_unchecked_mut(existing_bucket).values.get_unchecked_mut(existing_index).assume_init_mut() = value;
         }
@@ -184,18 +190,23 @@ impl<V> HashTable<V> {
         }
         let mut hash64 = fold_hash_fast(key, self.seed);
         let bucket_mask = self.bucket_mask;
+        let mut result = None;
         for i in 0..2 {
             let bucket = unsafe { self.table.get_unchecked(hash64 as usize & bucket_mask) };
             let keys = bucket.keys;
-            if let Some(index) = control64::search(key, keys) {
-                return Some(unsafe { bucket.values.get_unchecked(index).assume_init_ref() });
-            }
-            if control64::search(0, keys).is_some() {
-                return None;
+            let (mask, stride) = control64::search_mask(key, keys);
+            const BRANCHLESS: bool = true;  // true for in-cache; false for out-of-cache.
+            if BRANCHLESS {
+                result = std::hint::select_unpredictable(mask != 0, Some((mask, bucket, stride)), result);
+            } else {
+                if mask != 0 {
+                    let index = mask.trailing_zeros() as usize / stride;
+                    return Some(unsafe { bucket.values.get_unchecked(index).assume_init_ref() });
+                }
             }
             hash64 ^= hash64.rotate_left(32);
         }
-        None
+        result.map(|(mask, bucket, stride)| unsafe { bucket.values.get_unchecked(mask.trailing_zeros() as usize / stride).assume_init_ref() })
     }
 
     #[inline(always)]

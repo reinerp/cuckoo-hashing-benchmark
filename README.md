@@ -5,10 +5,11 @@ Benchmark for cuckoo hashing
 
 **Cuckoo hashing** works really, both in SIMD and non-SIMD context. Improves find_miss and insertion, neutral on find_hit.
 * Big improvement on find_miss and insertion, especially at large load factors, and especially for in-TLB (nearly-in-cache) tables.
+* A nice bonus is that we don't need to check for empty slots; checking for key matches is sufficient. This speeds up find_hit. When in-cache, in fact it can be 100% branchless in the Direct SIMD case, which helps a lot.
 * TODO: BFS loop should be "hash then search", not "search then hash". That avoids redundant hashing operations.
 * For huge tables (out-of-cache, out-of-TLB), insertion is a little slower.
 * Cuckoo actually has *faster* insertion than non-cuckoo, with advantage growing as load factor increases. This relies on being able to compute the "alternative" cuckoo bucket from just the tag array, as is possible with the `base_hash ^ hash(tag)` approach.
-* Unaligned cuckoo hashing seems beneficial, but I haven't implemented an efficient BFS for it, so I don't yet have efficient insertion at high load factors.
+* Unaligned cuckoo hashing seems beneficial
 
 **Indirect SIMD** probing works really well at large load factors, where it improves almost everything. 
 

@@ -285,8 +285,8 @@ impl<V> HashTable<V> {
                     return Some(unsafe { &(*bucket).1 });
                 }
             }
-            // TODO(reiner): possibly skip early return here. The early return prevents deletions.
-            if is_second_group || (false && group.match_empty().any_bit_set()) {
+            const ALLOW_EARLY_RETURN: bool = false;
+            if is_second_group || (ALLOW_EARLY_RETURN && group.match_empty().any_bit_set()) {
                 return None;
             }
             hash64 = hash64.rotate_left(32);

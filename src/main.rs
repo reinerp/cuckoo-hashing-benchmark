@@ -77,26 +77,22 @@ macro_rules! benchmark_find_hit {
             std::io::stdout().flush().unwrap();
             let mut table = <$table>::with_capacity(capacity);
             let mut rng = fastrand::Rng::with_seed(123);
-            for _ in 0..n {
+            for i in 0..n {
                 let key = rng.u64(..);
-                table.insert(key, <$v>::default());
+                table.insert(i as u64, <$v>::default());
             }
-            let outer_iters = ITERS.div_ceil(n);
-            let true_iters = outer_iters * n;
+            let n_ish_mask = ((n.next_power_of_two() / 2) - 1) as u64;
             let start = Instant::now();
             let mut found = 0;
-            for _ in 0..outer_iters {
-                let mut rng = fastrand::Rng::with_seed(123);
-                for _ in 0..n {
-                    let key = rng.u64(..);
-                    found += table.get(&key).is_some() as usize;
-                }
+            for _ in 0..ITERS {
+                let key = rng.u64(..) & n_ish_mask;
+                found += table.get(&key).is_some() as usize;
             }
             black_box(found);
             let duration = start.elapsed();
             println!(
                 "{:.2} ns/op",
-                duration.as_nanos() as f64 / true_iters as f64
+                duration.as_nanos() as f64 / ITERS as f64
             );
         })
     };
