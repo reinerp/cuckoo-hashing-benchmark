@@ -175,7 +175,6 @@ impl<V: Copy> HashTable<V> {
                 let mut bfs_read_pos = 0;
                 let (mut path_index, mut bucket_index) = 'bfs: loop {
                     let pos0 = unsafe { bfs_queue[bfs_read_pos + 0].assume_init() };
-                    let pos1 = unsafe { bfs_queue[bfs_read_pos + 1].assume_init() };
 
                     let bfs_write_pos = bfs_read_pos * N + 2;
                     if bfs_write_pos >= BFS_MAX_LEN {
@@ -186,30 +185,20 @@ impl<V: Copy> HashTable<V> {
                         let other_pos0 = pos0
                             ^ (scramble_tag(unsafe { *self.ctrl(pos0 + i) }) as usize
                                 & self.aligned_bucket_mask);
-                        let other_pos1 = pos1
-                            ^ (scramble_tag(unsafe { *self.ctrl(pos1 + i) }) as usize
-                                & self.aligned_bucket_mask);
                         let other_group0 = unsafe { Group::load(self.ctrl(other_pos0)) };
-                        let other_group1 = unsafe { Group::load(self.ctrl(other_pos1)) };
                         let bfs_write_pos_i = bfs_write_pos + i;
                         if let Some(empty_pos) = other_group0.match_empty().lowest_set_bit() {
                             break 'bfs (bfs_write_pos_i, other_pos0 + empty_pos);
-                        }
-                        if let Some(empty_pos) = other_group1.match_empty().lowest_set_bit() {
-                            break 'bfs (bfs_write_pos_i + N, other_pos1 + empty_pos);
                         }
                 
                         unsafe {
                             *bfs_queue
                                 .get_unchecked_mut(bfs_write_pos_i)
                                 .write(other_pos0);
-                            *bfs_queue
-                                .get_unchecked_mut(bfs_write_pos_i + N)
-                                .write(other_pos1);
                         }
                     }
 
-                    bfs_read_pos += 2;
+                    bfs_read_pos += 1;
                 };  // 'bfs
                 while path_index >= 2 {
                     let parent_path_index = (path_index - 2) / N;

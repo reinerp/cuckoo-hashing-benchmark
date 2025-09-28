@@ -340,9 +340,9 @@ fn main() {
                     // them with BFS and rehashing support. Until then, we skip the benchmarks.
                     let is_insert_and_erase = std::stringify!($benchmark) == "benchmark_insert_and_erase";
                     // $benchmark!(aligned_double_hashing_table::HashTable::<u64>, u64)(n, capacity);
-                    // $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
+                    $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
                     // $benchmark!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
-                    // $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     // $benchmark!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     // $benchmark!(direct_simd_quadratic_probing::HashTable::<u64>, u64)(n, capacity);
