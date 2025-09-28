@@ -3,7 +3,7 @@ Benchmark for cuckoo hashing
 
 ## Findings so far
 
-**Cuckoo hashing** works really, both in SIMD and non-SIMD context. Improves find_miss and insertion, neutral on find_hit.
+**Cuckoo hashing** works really well, both in SIMD and non-SIMD context. Improves find_miss, find_hit, and insertion.
 * Big improvement on find_miss and insertion, especially at large load factors, and especially for in-TLB (nearly-in-cache) tables.
 * A nice bonus is that we don't need to check for empty slots; checking for key matches is sufficient. This speeds up find_hit. When in-cache, in fact it can be 100% branchless in the Direct SIMD case, which helps a lot.
 * TODO: BFS loop should be "hash then search", not "search then hash". That avoids redundant hashing operations.
