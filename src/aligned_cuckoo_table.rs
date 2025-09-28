@@ -4,9 +4,9 @@ use std::hint::{black_box, likely};
 use std::mem::MaybeUninit;
 use std::{alloc::Layout, ptr::NonNull};
 
-use crate::dropper::Dropper;
 use crate::TRACK_PROBE_LENGTH;
 use crate::control::{Group, Tag, TagSliceExt as _};
+use crate::dropper::Dropper;
 use crate::u64_fold_hash_fast::{self, fold_hash_fast};
 use crate::uunwrap::UUnwrap;
 
@@ -117,109 +117,130 @@ impl<V: Copy> HashTable<V> {
         let tag_hash = Tag::full(hash0);
         let hash1 = hash0 ^ scramble_tag(tag_hash);
 
-        // Probe first group for a match.
-        let pos0 = hash0 as usize & self.aligned_bucket_mask;
-        let group0 = unsafe { Group::load(self.ctrl(pos0)) };
+        let (bucket, index) =  'hit: loop {
+            let pos0 = hash0 as usize & self.aligned_bucket_mask;
+            let group0 = unsafe { Group::load(self.ctrl(pos0)) };
 
-        for bit in group0.match_tag(tag_hash) {
-            let index = (pos0 + bit) & self.bucket_mask;
+            // Probe first group for a match.
+            for bit in group0.match_tag(tag_hash) {
+                let index = (pos0 + bit) & self.bucket_mask;
 
-            let bucket = unsafe { self.bucket(index) };
+                let bucket = unsafe { self.bucket(index) };
 
-            if unsafe { (*bucket).0 } == key {
-                unsafe { (*bucket).1 = value };
-                return (false, index);
-            }
-        }
-
-        // Probe second group for a match.
-        let pos1 = hash1 as usize & self.aligned_bucket_mask;
-        let group1 = unsafe { Group::load(self.ctrl(pos1)) };
-
-        for bit in group1.match_tag(tag_hash) {
-            let index = (pos1 + bit) & self.bucket_mask;
-
-            let bucket = unsafe { self.bucket(index) };
-
-            if unsafe { (*bucket).0 } == key {
-                unsafe { (*bucket).1 = value };
-                return (false, index);
-            }
-        }
-
-        // No match. Now check first group for an empty slot.
-        // TODO: this check is redundant with the BFS loop below.
-        self.items += 1;
-
-        // Cuckoo loop. BFS queue maintains group indexes to visit.
-        //
-        // We search two complete N-ary trees, where N=Group::WIDTH. We search up to depth D=3, i.e. 
-        // 2 groups at the first level, 2*N, 2*N^2, 2*N^3.
-        //
-        // The parent of node at index `i` is at index `(i-2)/N`. Inversely, the first child of 
-        // node `j` is at index `j*N+2`.
-        const N: usize = Group::WIDTH;
-        const BFS_MAX_LEN: usize = 2 * (1 + N + N*N + N*N*N);
-
-        let mut pos0 = pos0;
-        let mut pos1 = pos1;
-        let mut group0 = group0;
-        let mut group1 = group1;
-
-        let mut bfs_queue = [MaybeUninit::<usize>::uninit(); BFS_MAX_LEN];
-        bfs_queue[0].write(pos0);
-        bfs_queue[1].write(pos1);
-        let mut bfs_read_pos = 0;
-        let (mut path_index, mut bucket_index) = loop {
-            if let Some(empty_pos) = group0.match_empty().lowest_set_bit() {
-                break (bfs_read_pos + 0, pos0 + empty_pos);
-            }
-            if let Some(empty_pos) = group1.match_empty().lowest_set_bit() {
-                break (bfs_read_pos + 1, pos1 + empty_pos);
-            }
-
-            let bfs_write_pos = bfs_read_pos * N + 2;
-            if bfs_write_pos < BFS_MAX_LEN {
-                for i in 0..N {
-                    let other_pos0 = pos0 ^ (scramble_tag(unsafe { *self.ctrl(pos0 + i) }) as usize & self.aligned_bucket_mask);
-                    let other_pos1 = pos1 ^ (scramble_tag(unsafe { *self.ctrl(pos1 + i) }) as usize & self.aligned_bucket_mask);
-                    unsafe { 
-                        *bfs_queue.get_unchecked_mut(bfs_write_pos + i).write(other_pos0);
-                        *bfs_queue.get_unchecked_mut(bfs_write_pos + i + N).write(other_pos1);
-                    }
+                if unsafe { (*bucket).0 } == key {
+                    break 'hit (bucket, index);
                 }
             }
 
-            bfs_read_pos += 2;
+            // Probe second group for a match.
+            let pos1 = hash1 as usize & self.aligned_bucket_mask;
+            let group1 = unsafe { Group::load(self.ctrl(pos1)) };
 
-            if bfs_read_pos + 2 > BFS_MAX_LEN {
-                panic!("Failed to insert into cuckoo table; need to rehash");
+            for bit in group1.match_tag(tag_hash) {
+                let index = (pos1 + bit) & self.bucket_mask;
+
+                let bucket = unsafe { self.bucket(index) };
+
+                if unsafe { (*bucket).0 } == key {
+                    break 'hit (bucket, index);
+                }
             }
-            pos0 = unsafe { bfs_queue[bfs_read_pos + 0].assume_init() };
-            pos1 = unsafe { bfs_queue[bfs_read_pos + 1].assume_init() };
-            group0 = unsafe { Group::load(self.ctrl(pos0)) };
-            group1 = unsafe { Group::load(self.ctrl(pos1)) };
-        };
-        while path_index >= 2 {
-            let parent_path_index = (path_index - 2) / N;
-            let parent_bucket_offset = (path_index - 2) % N;
-            let parent_bucket_index = unsafe { bfs_queue.get_unchecked(parent_path_index).assume_init() } + parent_bucket_offset;
-            
-            // Move from parent to child.
+
+            // Now search for (a path to) an empty slot.
+            let bucket_index = 'search_empty: loop {
+                self.items += 1;
+
+                if let Some(insert_slot) = group0.match_empty().lowest_set_bit() {
+                    let insert_slot = (pos0 + insert_slot) & self.bucket_mask;
+                    break 'search_empty insert_slot;
+                }
+                if let Some(insert_slot) = group1.match_empty().lowest_set_bit() {
+                    let insert_slot = (pos1 + insert_slot) & self.bucket_mask;
+                    break 'search_empty insert_slot;
+                }
+
+                // Cuckoo loop. BFS queue maintains group indexes to visit.
+                //
+                // We search two complete N-ary trees, where N=Group::WIDTH. We search up to depth D=3, i.e.
+                // 2 groups at the first level, 2*N, 2*N^2, 2*N^3.
+                //
+                // The parent of node at index `i` is at index `(i-2)/N`. Inversely, the first child of
+                // node `j` is at index `j*N+2`.
+                const N: usize = Group::WIDTH;
+                const BFS_MAX_LEN: usize = 2 * (1 + N + N * N + N * N * N);
+
+                let mut bfs_queue = [MaybeUninit::<usize>::uninit(); BFS_MAX_LEN];
+                bfs_queue[0].write(pos0);
+                bfs_queue[1].write(pos1);
+                let mut bfs_read_pos = 0;
+                let (mut path_index, mut bucket_index) = 'bfs: loop {
+                    let pos0 = unsafe { bfs_queue[bfs_read_pos + 0].assume_init() };
+                    let pos1 = unsafe { bfs_queue[bfs_read_pos + 1].assume_init() };
+
+                    let bfs_write_pos = bfs_read_pos * N + 2;
+                    if bfs_write_pos >= BFS_MAX_LEN {
+                        panic!("Failed to insert into cuckoo table; need to rehash");
+                    }
+
+                    for i in 0..N {
+                        let other_pos0 = pos0
+                            ^ (scramble_tag(unsafe { *self.ctrl(pos0 + i) }) as usize
+                                & self.aligned_bucket_mask);
+                        let other_pos1 = pos1
+                            ^ (scramble_tag(unsafe { *self.ctrl(pos1 + i) }) as usize
+                                & self.aligned_bucket_mask);
+                        let other_group0 = unsafe { Group::load(self.ctrl(other_pos0)) };
+                        let other_group1 = unsafe { Group::load(self.ctrl(other_pos1)) };
+                        let bfs_write_pos_i = bfs_write_pos + i;
+                        if let Some(empty_pos) = other_group0.match_empty().lowest_set_bit() {
+                            break 'bfs (bfs_write_pos_i, other_pos0 + empty_pos);
+                        }
+                        if let Some(empty_pos) = other_group1.match_empty().lowest_set_bit() {
+                            break 'bfs (bfs_write_pos_i + N, other_pos1 + empty_pos);
+                        }
+                
+                        unsafe {
+                            *bfs_queue
+                                .get_unchecked_mut(bfs_write_pos_i)
+                                .write(other_pos0);
+                            *bfs_queue
+                                .get_unchecked_mut(bfs_write_pos_i + N)
+                                .write(other_pos1);
+                        }
+                    }
+
+                    bfs_read_pos += 2;
+                };  // 'bfs
+                while path_index >= 2 {
+                    let parent_path_index = (path_index - 2) / N;
+                    let parent_bucket_offset = (path_index - 2) % N;
+                    let parent_bucket_index =
+                        unsafe { bfs_queue.get_unchecked(parent_path_index).assume_init() }
+                            + parent_bucket_offset;
+
+                    // Move from parent to child.
+                    unsafe {
+                        let parent_kv = self.bucket(parent_bucket_index).read();
+                        self.bucket(bucket_index).write(parent_kv);
+                        self.set_ctrl(bucket_index, unsafe { *self.ctrl(parent_bucket_index) });
+                    }
+                    bucket_index = parent_bucket_index;
+                    path_index = parent_path_index;
+                }
+                break 'search_empty bucket_index;
+            };  // 'search_empty
+
             unsafe {
-                let parent_kv = self.bucket(parent_bucket_index).read();
-                self.bucket(bucket_index).write(parent_kv);
-                self.set_ctrl(bucket_index, unsafe { *self.ctrl(parent_bucket_index) });
+                self.bucket(bucket_index).write((key, value));
+                self.set_ctrl(bucket_index, tag_hash);
             }
-            bucket_index = parent_bucket_index;
-            path_index = parent_path_index;
-        }
-        unsafe {
-            self.bucket(bucket_index).write((key, value));
-            self.set_ctrl(bucket_index, tag_hash);    
-        }
-        return (true, bucket_index);
-}
+            return (true, bucket_index);
+        };  // 'hit
+        unsafe { (*bucket).1 = value };
+        return (false, index);
+
+
+    }
 
     #[inline(always)]
     pub fn get(&mut self, key: &u64) -> Option<&V> {
@@ -233,7 +254,7 @@ impl<V: Copy> HashTable<V> {
             let pos = hash64 as usize & self.aligned_bucket_mask;
             let group = unsafe { Group::load(self.ctrl(pos)) };
             for bit in group.match_tag(tag_hash) {
-                let index = (pos + bit) & self.bucket_mask;  // TODO: bucket_mask not required, since aligned
+                let index = (pos + bit) & self.bucket_mask; // TODO: bucket_mask not required, since aligned
 
                 let bucket = unsafe { self.bucket(index) };
 

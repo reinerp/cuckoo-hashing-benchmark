@@ -131,7 +131,7 @@ macro_rules! benchmark_find_hit {
             let mut table = <$table>::with_capacity(capacity);
             let mut rng = fastrand::Rng::with_seed(123);
             let mut keys = (0..n).map(|i| i as u64).collect::<Vec<_>>();
-            keys.shuffle(&mut rng);
+            rng.shuffle(&mut keys);
             for key in keys {
                 table.insert(key, <$v>::default());
             }
@@ -244,7 +244,7 @@ macro_rules! benchmark_probe_histogram {
             // Sample present keys
             for key in 0..n as u64 {
                 let (probe_length, found) = table.probe_length(key);
-                // assert!(found);
+                assert!(found);
                 *present_histogram.entry(probe_length).or_insert(0) += 1;
             }
 
