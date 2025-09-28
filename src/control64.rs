@@ -25,6 +25,21 @@ pub fn search(key: u64, bucket: [u64; 4]) -> Option<usize> {
                     }
                 }
             };
+        } else if #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))] {
+            return {
+                use core::arch::x86_64::*;
+                unsafe {
+                    let key_vec = _mm256_set1_epi64x(key as i64);
+                    let bucket_vec = _mm256_loadu_si256(bucket.as_ptr() as *const __m256i);
+                    let eq_mask = _mm256_cmpeq_epi64(bucket_vec, key_vec);
+                    let movemask = _mm256_movemask_pd(_mm256_castsi256_pd(eq_mask));
+                    if movemask == 0 {
+                        None
+                    } else {
+                        Some(movemask.trailing_zeros() as usize)
+                    }
+                }
+            };
         } else {
             unimplemented!()
         }
