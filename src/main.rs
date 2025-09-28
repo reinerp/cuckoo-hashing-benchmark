@@ -19,6 +19,7 @@ mod dropper;
 mod direct_simd_cuckoo_table;
 mod control64;
 mod localized_simd_cuckoo_table;
+mod direct_simd_quadratic_probing;
 
 const ITERS: usize = 100_000_000;
 const TRACK_PROBE_LENGTH: bool = false;
@@ -194,7 +195,7 @@ fn main() {
     //     }
     // }
 
-    for lg_mi in [15] {
+    for lg_mi in [15, 25] {
         println!("mi: 2^{lg_mi}");
         let mi = 1 << lg_mi;
         for load_factor in [4, 5, 6, 7] {
@@ -206,35 +207,36 @@ fn main() {
                     // Our cuckoo tables fail on repeated insert_erase on high load factors. We need to extend
                     // them with BFS and rehashing support. Until then, we skip the benchmarks.
                     let is_insert_and_erase = std::stringify!($benchmark) == "benchmark_insert_and_erase";
-                    $benchmark!(aligned_double_hashing_table::HashTable::<u64>, u64)(n, capacity);
+                    // $benchmark!(aligned_double_hashing_table::HashTable::<u64>, u64)(n, capacity);
                     $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
                     // $benchmark!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
-                    if load_factor < 7 && (!is_insert_and_erase || load_factor < 6) && lg_mi < 25 {
-                        // This cuckoo table doesn't work for large load factors.
+                    // if load_factor < 7 && (!is_insert_and_erase || load_factor < 6) && lg_mi < 25 {
+                    //     // This cuckoo table doesn't work for large load factors.
                         $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-                    }
-                    $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-                    // $benchmark!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    // }
+                    // $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    $benchmark!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    $benchmark!(direct_simd_quadratic_probing::HashTable::<u64>, u64)(n, capacity);
                     // if !is_insert_and_erase || load_factor < 7 {
                     //     $benchmark!(balancing_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     // }
-                    {
-                        let n = n * 7 / 8;
-                        $benchmark!(localized_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-                    }
+                    // {
+                    //     let n = n * 7 / 8;
+                    //     $benchmark!(localized_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    // }
                     // $benchmark!(scalar_cache_line_aligned_table::U64HashSet::<u64>, u64)(n, capacity);
                     // $benchmark!(scalar_unaligned_table::U64HashSet::<u64>, u64)(n, capacity);
-                    if !is_insert_and_erase || load_factor < 6 {
-                        $benchmark!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n, capacity);
-                    }
-                    $benchmark!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
+                    // if !is_insert_and_erase || load_factor < 6 {
+                    //     $benchmark!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n, capacity);
+                    // }
+                    // $benchmark!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
                 }
             }
 
             benchmark_all!(benchmark_find_miss);
-            benchmark_all!(benchmark_find_hit);
+            // benchmark_all!(benchmark_find_hit);
             // benchmark_all!(benchmark_find_latency);
-            benchmark_all!(benchmark_insert_and_erase);
+            // benchmark_all!(benchmark_insert_and_erase);
         }
     }
 }

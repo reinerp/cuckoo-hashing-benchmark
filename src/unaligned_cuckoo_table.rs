@@ -285,7 +285,7 @@ impl<V> HashTable<V> {
                     return Some(unsafe { &(*bucket).1 });
                 }
             }
-            const ALLOW_EARLY_RETURN: bool = false;
+            const ALLOW_EARLY_RETURN: bool = true;
             if is_second_group || (ALLOW_EARLY_RETURN && group.match_empty().any_bit_set()) {
                 return None;
             }

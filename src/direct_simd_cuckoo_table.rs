@@ -195,7 +195,7 @@ impl<V> HashTable<V> {
             let bucket = unsafe { self.table.get_unchecked(hash64 as usize & bucket_mask) };
             let keys = bucket.keys;
             let (mask, stride) = control64::search_mask(key, keys);
-            const BRANCHLESS: bool = true;  // true for in-cache; false for out-of-cache.
+            const BRANCHLESS: bool = false;  // true for in-cache; false for out-of-cache.
             if BRANCHLESS {
                 result = std::hint::select_unpredictable(mask != 0, Some((mask, bucket, stride)), result);
             } else {
