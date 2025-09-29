@@ -327,7 +327,7 @@ fn main() {
     //     }
     // }
 
-    for lg_mi in [15, 25] {  // Focus on 2^15 for fast testing
+    for lg_mi in [25] {  // Focus on 2^15 for fast testing
         println!("mi: 2^{lg_mi}");
         let mi = 1 << lg_mi;
         for load_factor in [16, 24, 28] {  // Use a single moderate load factor
@@ -366,10 +366,10 @@ fn main() {
             // benchmark_all!(benchmark_find_miss);
             // benchmark_all!(benchmark_find_hit);
             // benchmark_all!(benchmark_find_latency);
-            benchmark_all!(benchmark_insert_and_erase);
+            // benchmark_all!(benchmark_insert_and_erase);
 
             // Run the probe histogram benchmark
-            // benchmark_all!(benchmark_probe_histogram);
+            benchmark_all!(benchmark_probe_histogram);
         }
     }
 }
