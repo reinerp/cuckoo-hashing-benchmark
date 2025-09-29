@@ -95,12 +95,13 @@ impl<V> HashTable<V> {
     }
 
     #[inline(always)]
-    pub fn insert(&mut self, key: u64, value: V) -> (bool, (usize, usize)) {
+    pub fn insert(&mut self, key: u64, value: V) -> (bool, (usize, usize), usize) {
+        let mut insertion_probe_length = 1;
         if key == 0 {
             let inserted = self.zero_value.is_none();
             self.len += inserted as usize;
             self.zero_value = Some(value);
-            return (inserted, (usize::MAX, usize::MAX));
+            return (inserted, (usize::MAX, usize::MAX), insertion_probe_length);
         }
 
         let hash64 = fold_hash_fast(key, self.seed);
@@ -121,7 +122,7 @@ impl<V> HashTable<V> {
                         .values.get_unchecked_mut(index)
                         .assume_init_mut() = value;
                 }
-                return (false, (probe_seq.pos, index));
+                return (false, (probe_seq.pos, index), insertion_probe_length);
             }
 
             // Look for empty slot (key == 0) in this bucket using SIMD
@@ -138,7 +139,8 @@ impl<V> HashTable<V> {
                 if TRACK_PROBE_LENGTH {
                     self.total_probe_length += probe_count + 1;
                 }
-                return (true, (probe_seq.pos, index));
+                insertion_probe_length = probe_count + 1;
+                return (true, (probe_seq.pos, index), insertion_probe_length);
             }
 
             // No match and no empty slot, move to next bucket via quadratic probing
@@ -216,7 +218,7 @@ impl<V> HashTable<V> {
 
     #[inline(always)]
     pub fn insert_and_erase(&mut self, key: u64, value: V) {
-        let (inserted, (bucket_index, bucket_offset)) = self.insert(key, value);
+        let (inserted, (bucket_index, bucket_offset), _) = self.insert(key, value);
         if inserted {
             if key == 0 {
                 self.zero_value = None;

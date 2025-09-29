@@ -93,10 +93,11 @@ impl<V> HashTable<V> {
     }
 
     #[inline(always)]
-    pub fn insert(&mut self, key: u64, value: V) -> (bool, usize) {
+    pub fn insert(&mut self, key: u64, value: V) -> (bool, usize, usize) {
         let hash0 = fold_hash_fast(key, self.seed);
         let hash1 = hash0.rotate_left(32);
         let tag_hash = Tag::full(hash0);
+        let mut insertion_probe_length = 1; // Start with 1 probe
 
         // Probe first group for a match.
         let pos0 = hash0 as usize & self.bucket_mask;
@@ -109,11 +110,12 @@ impl<V> HashTable<V> {
 
             if unsafe { (*bucket).0 } == key {
                 unsafe { (*bucket).1 = value };
-                return (false, index);
+                return (false, index, insertion_probe_length);
             }
         }
 
         // Probe second group for a match.
+        insertion_probe_length = 2; // If we reach here, we've probed 2 groups
         let pos1 = hash1 as usize & self.bucket_mask;
         let group1 = unsafe { Group::load(self.ctrl(pos1)) };
 
@@ -124,29 +126,41 @@ impl<V> HashTable<V> {
 
             if unsafe { (*bucket).0 } == key {
                 unsafe { (*bucket).1 = value };
-                return (false, index);
+                return (false, index, insertion_probe_length);
             }
         }
-
-        let mut insert_probe_length = 1;
 
         // No match. Now check first group for an empty slot.
         if let Some(insert_slot) = group0.match_empty().lowest_set_bit() {
             let insert_slot = (pos0 + insert_slot) & self.bucket_mask;
-            unsafe { 
+            insertion_probe_length = 1; // Found in first group
+            unsafe {
                 self.set_ctrl(insert_slot, tag_hash);
                 self.bucket(insert_slot).write((key, value));
                 self.items += 1;
                 if TRACK_PROBE_LENGTH {
                     self.total_probe_length += 1;
-                    self.total_insert_probe_length += insert_probe_length;
-                    self.max_insert_probe_length = self.max_insert_probe_length.max(insert_probe_length);
                 }
-                return (true, insert_slot);
+                return (true, insert_slot, insertion_probe_length);
             }
         }
 
-        // key is going to get inserted in the second location.
+        // Check second group for an empty slot.
+        if let Some(insert_slot) = group1.match_empty().lowest_set_bit() {
+            let insert_slot = (pos1 + insert_slot) & self.bucket_mask;
+            insertion_probe_length = 2; // Found in second group
+            unsafe {
+                self.set_ctrl(insert_slot, tag_hash);
+                self.bucket(insert_slot).write((key, value));
+                self.items += 1;
+                if TRACK_PROBE_LENGTH {
+                    self.total_probe_length += 2;
+                }
+                return (true, insert_slot, insertion_probe_length);
+            }
+        }
+
+        // key is going to get inserted via BFS.
         if TRACK_PROBE_LENGTH {
             self.total_probe_length += 2;
         }
@@ -170,9 +184,13 @@ impl<V> HashTable<V> {
         let mut bfs_read_pos = 0;
         let (mut path_index, mut bucket_index) = loop {
             if let Some(empty_pos) = group0.match_empty().lowest_set_bit() {
+                // Calculate insertion probe length: 2 initial + BFS level
+                insertion_probe_length = 2 + bfs_read_pos / 2;
                 break (bfs_read_pos + 0, (pos0 + empty_pos) & self.bucket_mask);
             }
             if let Some(empty_pos) = group1.match_empty().lowest_set_bit() {
+                // Calculate insertion probe length: 2 initial + BFS level
+                insertion_probe_length = 2 + bfs_read_pos / 2;
                 break (bfs_read_pos + 1, (pos1 + empty_pos) & self.bucket_mask);
             }
 
@@ -249,18 +267,13 @@ impl<V> HashTable<V> {
             self.bucket(bucket_index).write((key, value));
             self.set_ctrl(bucket_index, tag_hash);
             self.items += 1;
-            insert_probe_length += path_index + 1;
-            if TRACK_PROBE_LENGTH {
-                self.total_insert_probe_length += insert_probe_length;
-                self.max_insert_probe_length = self.max_insert_probe_length.max(insert_probe_length);
-            }
-            return (true, bucket_index);
+            return (true, bucket_index, insertion_probe_length);
         }
     }
 
     #[inline(always)]
     pub unsafe fn insert_and_erase(&mut self, key: u64, value: V) {
-        let (inserted, index) = self.insert(key, value);
+        let (inserted, index, _) = self.insert(key, value);
         if inserted {
             unsafe {
                 self.set_ctrl(index, Tag::EMPTY);

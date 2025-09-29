@@ -90,6 +90,24 @@ fn drop_spaces(s: &str) -> String {
     s.split_whitespace().collect()
 }
 
+fn print_histogram(name: &str, histogram: &std::collections::HashMap<usize, usize>) {
+    let total_probes: usize = histogram.iter()
+        .map(|(length, count)| length * count)
+        .sum();
+    let total_count: usize = histogram.values().sum();
+    let avg = if total_count > 0 {
+        total_probes as f64 / total_count as f64
+    } else { 0.0 };
+
+    println!("  {} (avg: {:.3}):", name, avg);
+    let mut keys: Vec<_> = histogram.keys().cloned().collect();
+    keys.sort();
+    for probe_length in keys {
+        let count = histogram[&probe_length];
+        println!("    {}: {}", probe_length, count);
+    }
+}
+
 #[inline(always)]
 fn mul_high_u64(x: u64, y: u64) -> u64 {
     let r = (x as u128) * (y as u128);
@@ -258,44 +276,31 @@ macro_rules! benchmark_probe_histogram {
                 }
             }
 
-            // Calculate average probe lengths
-            let present_total_probes: usize = present_histogram.iter()
-                .map(|(length, count)| length * count)
-                .sum();
-            let present_total_count: usize = present_histogram.values().sum();
-            let present_avg = if present_total_count > 0 {
-                present_total_probes as f64 / present_total_count as f64
-            } else { 0.0 };
+            // Print histograms using shared function
+            print_histogram("Present key probe lengths", &present_histogram);
+            print_histogram("Absent key probe lengths", &absent_histogram);
+        })
+    };
+}
 
-            let absent_total_probes: usize = absent_histogram.iter()
-                .map(|(length, count)| length * count)
-                .sum();
-            let absent_total_count: usize = absent_histogram.values().sum();
-            let absent_avg = if absent_total_count > 0 {
-                absent_total_probes as f64 / absent_total_count as f64
-            } else { 0.0 };
+macro_rules! benchmark_insertion_probe_histogram {
+    ($table:ty, $v:ty) => {
+        (|n: usize, capacity: usize| {
+            println!("insertion_probe_histogram  {}/{n}:", drop_spaces(stringify!($table)));
+            let mut table = <$table>::with_capacity(capacity);
+            let mut rng = fastrand::Rng::with_seed(123);
+            let mut insertion_histogram = std::collections::HashMap::new();
 
-            // Print averages
-            println!("  Average probe lengths:");
-            println!("    Present keys: {:.3}", present_avg);
-            println!("    Absent keys:  {:.3}", absent_avg);
-
-            // Print histograms
-            println!("  Present key probe lengths:");
-            let mut present_keys: Vec<_> = present_histogram.keys().cloned().collect();
-            present_keys.sort();
-            for probe_length in present_keys {
-                let count = present_histogram[&probe_length];
-                println!("    {}: {}", probe_length, count);
+            // Insert keys and collect insertion probe lengths
+            let mut keys = (0..n).map(|i| i as u64).collect::<Vec<_>>();
+            rng.shuffle(&mut keys);
+            for key in keys {
+                let (_, _, insertion_probe_length) = table.insert(key, <$v>::default());
+                *insertion_histogram.entry(insertion_probe_length).or_insert(0) += 1;
             }
 
-            println!("  Absent key probe lengths:");
-            let mut absent_keys: Vec<_> = absent_histogram.keys().cloned().collect();
-            absent_keys.sort();
-            for probe_length in absent_keys {
-                let count = absent_histogram[&probe_length];
-                println!("    {}: {}", probe_length, count);
-            }
+            // Print histogram using shared function
+            print_histogram("Insertion probe lengths", &insertion_histogram);
         })
     };
 }
@@ -368,8 +373,10 @@ fn main() {
             // benchmark_all!(benchmark_find_latency);
             // benchmark_all!(benchmark_insert_and_erase);
 
-            // Run the probe histogram benchmark
+            // Run the probe histogram benchmarks
             benchmark_all!(benchmark_probe_histogram);
+            println!();
+            benchmark_all!(benchmark_insertion_probe_histogram);
         }
     }
 }

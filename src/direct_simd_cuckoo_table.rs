@@ -58,12 +58,14 @@ impl<V> HashTable<V> {
     }
 
     #[inline(always)]
-    pub fn insert(&mut self, mut key: u64, mut value: V) -> (bool, (usize, usize)) {
+    pub fn insert(&mut self, mut key: u64, mut value: V) -> (bool, (usize, usize), usize) {
+        let mut insertion_probe_length = 1;
+
         if key == 0 {
             let inserted = self.zero_value.is_none();
             self.len += inserted as usize;
             self.zero_value = Some(value);
-            return (inserted, (usize::MAX, usize::MAX));
+            return (inserted, (usize::MAX, usize::MAX), insertion_probe_length);
         }
         let bucket_mask = self.bucket_mask;
         let hash64 = fold_hash_fast(key, self.seed);
@@ -79,6 +81,7 @@ impl<V> HashTable<V> {
             }
 
             // Probe second group for a match.
+            insertion_probe_length = 2;
             let pos1 = (hash64 ^ hash64.rotate_left(32)) as usize & self.bucket_mask;
             let keys1 = unsafe { self.table.get_unchecked(pos1) }.keys;
             let (mask, stride) = control64::search_mask(key, keys1);
@@ -173,13 +176,15 @@ impl<V> HashTable<V> {
                 bucket.keys[bucket_offset] = key;
                 bucket.values[bucket_offset].write(value);
             }
-            return (true, (bucket_index, bucket_offset));
+            // Calculate insertion probe length: base probes + BFS depth
+            insertion_probe_length = 2 + (path_index + 1) / 2;
+            return (true, (bucket_index, bucket_offset), insertion_probe_length);
         };
         let existing_index = existing_mask.trailing_zeros() as usize / stride;
         unsafe {
             *self.table.get_unchecked_mut(existing_bucket).values.get_unchecked_mut(existing_index).assume_init_mut() = value;
         }
-        (false, (existing_bucket, existing_index))
+        (false, (existing_bucket, existing_index), insertion_probe_length)
     }
 
     #[inline(always)]
@@ -241,7 +246,7 @@ impl<V> HashTable<V> {
 
     #[inline(always)]
     pub fn insert_and_erase(&mut self, key: u64, value: V) {
-        let (inserted, (bucket_index, bucket_offset)) = self.insert(key, value);
+        let (inserted, (bucket_index, bucket_offset), _) = self.insert(key, value);
         if inserted {
             if key == 0 {
                 self.zero_value = None;

@@ -77,7 +77,7 @@ impl<V: Copy> HashTable<V> {
     /// Safety: caller promises that there have been no tombstones in the table.
     #[inline(always)]
     pub unsafe fn insert_and_erase(&mut self, key: u64, value: V) {
-        let (inserted, index) = self.insert(key, value);
+        let (inserted, index, _) = self.insert(key, value);
         if inserted {
             unsafe {
                 self.set_ctrl(index, Tag::EMPTY);
@@ -112,10 +112,11 @@ impl<V: Copy> HashTable<V> {
     }
 
     #[inline(always)]
-    pub fn insert(&mut self, key: u64, value: V) -> (bool, usize) {
+    pub fn insert(&mut self, key: u64, value: V) -> (bool, usize, usize) {
         let hash0 = fold_hash_fast(key, self.seed);
         let tag_hash = Tag::full(hash0);
         let hash1 = hash0 ^ scramble_tag(tag_hash);
+        let mut insertion_probe_length = 1; // Start with 1 probe
 
         let (bucket, index) =  'hit: loop {
             let pos0 = hash0 as usize & self.aligned_bucket_mask;
@@ -133,6 +134,7 @@ impl<V: Copy> HashTable<V> {
             }
 
             // Probe second group for a match.
+            insertion_probe_length = 2; // If we reach here, we've probed 2 groups
             let pos1 = hash1 as usize & self.aligned_bucket_mask;
             let group1 = unsafe { Group::load(self.ctrl(pos1)) };
 
@@ -152,10 +154,12 @@ impl<V: Copy> HashTable<V> {
 
                 if let Some(insert_slot) = group0.match_empty().lowest_set_bit() {
                     let insert_slot = (pos0 + insert_slot) & self.bucket_mask;
+                    insertion_probe_length = 1; // Found in first group
                     break 'search_empty insert_slot;
                 }
                 if let Some(insert_slot) = group1.match_empty().lowest_set_bit() {
                     let insert_slot = (pos1 + insert_slot) & self.bucket_mask;
+                    insertion_probe_length = 2; // Found in second group
                     break 'search_empty insert_slot;
                 }
 
@@ -188,9 +192,11 @@ impl<V: Copy> HashTable<V> {
                         let other_group0 = unsafe { Group::load(self.ctrl(other_pos0)) };
                         let bfs_write_pos_i = bfs_write_pos + i;
                         if let Some(empty_pos) = other_group0.match_empty().lowest_set_bit() {
+                            // Calculate insertion probe length based on BFS level
+                            insertion_probe_length = 2 + (bfs_write_pos_i - 2) / N;
                             break 'bfs (bfs_write_pos_i, other_pos0 + empty_pos);
                         }
-                
+
                         unsafe {
                             *bfs_queue
                                 .get_unchecked_mut(bfs_write_pos_i)
@@ -223,10 +229,10 @@ impl<V: Copy> HashTable<V> {
                 self.bucket(bucket_index).write((key, value));
                 self.set_ctrl(bucket_index, tag_hash);
             }
-            return (true, bucket_index);
+            return (true, bucket_index, insertion_probe_length);
         };  // 'hit
         unsafe { (*bucket).1 = value };
-        return (false, index);
+        return (false, index, insertion_probe_length);
 
 
     }
@@ -350,7 +356,7 @@ mod tests {
         let mut table = HashTable::with_capacity(16);
 
         // Test basic insertion
-        let (inserted, _) = table.insert(42, 100);
+        let (inserted, _, _) = table.insert(42, 100);
         assert!(inserted);
         assert_eq!(table.len(), 1);
 
@@ -364,12 +370,12 @@ mod tests {
         let mut table = HashTable::with_capacity(16);
 
         // Insert initial value
-        let (inserted, _) = table.insert(123, 456);
+        let (inserted, _, _) = table.insert(123, 456);
         assert!(inserted);
         assert_eq!(table.len(), 1);
 
         // Update with new value
-        let (inserted, _) = table.insert(123, 789);
+        let (inserted, _, _) = table.insert(123, 789);
         assert!(!inserted); // Should be false since key already existed
         assert_eq!(table.len(), 1); // Length should remain the same
 
@@ -383,7 +389,7 @@ mod tests {
 
         // Insert multiple values
         for i in 1..=20 {
-            let (inserted, _) = table.insert(i, i * 10);
+            let (inserted, _, _) = table.insert(i, i * 10);
             assert!(inserted);
         }
 
@@ -435,11 +441,11 @@ mod tests {
             let key = rng.u64(1..1000); // Avoid key 0 for simplicity
             let value = rng.u64(..);
 
-            let cuckoo_result = cuckoo_table.insert(key, value);
+            let (cuckoo_inserted, _, _) = cuckoo_table.insert(key, value);
             let std_existed = std_map.insert(key, value).is_some();
 
             // Check insertion result consistency
-            assert_eq!(cuckoo_result.0, !std_existed);
+            assert_eq!(cuckoo_inserted, !std_existed);
         }
 
         // Verify lengths match
@@ -462,10 +468,10 @@ mod tests {
             let key = rng.u64(1..500);
             let value = rng.u64(..);
 
-            let cuckoo_result = cuckoo_table.insert(key, value);
+            let (cuckoo_inserted, _, _) = cuckoo_table.insert(key, value);
             let std_existed = std_map.insert(key, value).is_some();
 
-            assert_eq!(cuckoo_result.0, !std_existed);
+            assert_eq!(cuckoo_inserted, !std_existed);
         }
 
         assert_eq!(cuckoo_table.len(), std_map.len());
@@ -491,7 +497,7 @@ mod tests {
         ];
 
         for &key in &test_keys {
-            let (inserted, _) = table.insert(key, key);
+            let (inserted, _, _) = table.insert(key, key);
             assert!(inserted);
         }
 
@@ -545,7 +551,7 @@ mod tests {
         for round in 1..=3 {
             for i in 1..=10 {
                 let new_value = i * 100 * round;
-                let (cuckoo_inserted, _) = cuckoo_table.insert(i, new_value);
+                let (cuckoo_inserted, _, _) = cuckoo_table.insert(i, new_value);
                 let std_existed = std_map.insert(i, new_value).is_some();
 
                 assert!(!cuckoo_inserted); // Should be update, not insert
@@ -577,9 +583,9 @@ mod tests {
                     let key = rng.u64(1..200);
                     let value = rng.u64(..);
 
-                    let cuckoo_result = cuckoo_table.insert(key, value);
+                    let (cuckoo_inserted, _, _) = cuckoo_table.insert(key, value);
                     let std_existed = std_map.insert(key, value).is_some();
-                    assert_eq!(cuckoo_result.0, !std_existed);
+                    assert_eq!(cuckoo_inserted, !std_existed);
                 }
                 1 => {
                     // Lookup existing key

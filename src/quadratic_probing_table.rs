@@ -102,12 +102,13 @@ impl<V> HashTable<V> {
     }
 
     #[inline(always)]
-    pub fn insert(&mut self, key: u64, value: V) -> (bool, usize) {
+    pub fn insert(&mut self, key: u64, value: V) -> (bool, usize, usize) {
         let mut insert_slot = None;
         let hash64 = fold_hash_fast(key, self.seed);
         let tag_hash = Tag::full(hash64);
 
         let mut probe_seq = self.probe_seq(hash64);
+        let mut insertion_probe_length = 1;
 
         loop {
             let group = unsafe { Group::load(self.ctrl(probe_seq.pos)) };
@@ -119,7 +120,7 @@ impl<V> HashTable<V> {
 
                 if unsafe { (*bucket).0 } == key {
                     unsafe { (*bucket).1 = value };
-                    return (false, index);
+                    return (false, index, insertion_probe_length);
                 }
             }
 
@@ -132,21 +133,22 @@ impl<V> HashTable<V> {
             if let Some(insert_slot) = insert_slot {
                 if group.match_empty().any_bit_set() {
                     let insert_slot = insert_slot & self.bucket_mask;
-                    unsafe { 
+                    unsafe {
                         // The first Group::WIDTH control slots are replicated as the last Group::WIDTH control slots. We
                         // write to both.
                         self.set_ctrl(insert_slot, tag_hash);
                         self.bucket(insert_slot).write((key, value));
                         self.items += 1;
                         if TRACK_PROBE_LENGTH {
-                            self.total_probe_length += 1 + probe_seq.stride;
+                            self.total_probe_length += insertion_probe_length;
                         }
-                        return (true, insert_slot);
+                        return (true, insert_slot, insertion_probe_length);
                     }
                 }
             }
 
             probe_seq.move_next(self.bucket_mask);
+            insertion_probe_length += 1;
         }
     }
 
@@ -221,7 +223,7 @@ impl<V> HashTable<V> {
 
     #[inline(always)]
     pub unsafe fn insert_and_erase(&mut self, key: u64, value: V) {
-        let (inserted, index) = self.insert(key, value);
+        let (inserted, index, _) = self.insert(key, value);
         if inserted {
             unsafe {
                 self.set_ctrl(index, Tag::EMPTY);
