@@ -113,6 +113,21 @@ impl<V> HashTable<V> {
                 return (false, index, insertion_probe_length);
             }
         }
+        // No match. Now check first group for an empty slot.
+        if let Some(insert_slot) = group0.match_empty().lowest_set_bit() {
+            let insert_slot = (pos0 + insert_slot) & self.bucket_mask;
+            insertion_probe_length = 1; // Found in first group
+            unsafe {
+                self.set_ctrl(insert_slot, tag_hash);
+                self.bucket(insert_slot).write((key, value));
+                self.items += 1;
+                if TRACK_PROBE_LENGTH {
+                    self.total_probe_length += 1;
+                }
+                return (true, insert_slot, insertion_probe_length);
+            }
+        }
+
 
         // Probe second group for a match.
         insertion_probe_length = 2; // If we reach here, we've probed 2 groups
@@ -127,21 +142,6 @@ impl<V> HashTable<V> {
             if unsafe { (*bucket).0 } == key {
                 unsafe { (*bucket).1 = value };
                 return (false, index, insertion_probe_length);
-            }
-        }
-
-        // No match. Now check first group for an empty slot.
-        if let Some(insert_slot) = group0.match_empty().lowest_set_bit() {
-            let insert_slot = (pos0 + insert_slot) & self.bucket_mask;
-            insertion_probe_length = 1; // Found in first group
-            unsafe {
-                self.set_ctrl(insert_slot, tag_hash);
-                self.bucket(insert_slot).write((key, value));
-                self.items += 1;
-                if TRACK_PROBE_LENGTH {
-                    self.total_probe_length += 1;
-                }
-                return (true, insert_slot, insertion_probe_length);
             }
         }
 

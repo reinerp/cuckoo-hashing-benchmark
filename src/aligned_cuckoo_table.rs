@@ -118,45 +118,45 @@ impl<V: Copy> HashTable<V> {
         let hash1 = hash0 ^ scramble_tag(tag_hash);
         let mut insertion_probe_length = 1; // Start with 1 probe
 
-        let (bucket, index) =  'hit: loop {
-            let pos0 = hash0 as usize & self.aligned_bucket_mask;
-            let group0 = unsafe { Group::load(self.ctrl(pos0)) };
+        const EARLY_RETURN: bool = true;
 
-            // Probe first group for a match.
-            for bit in group0.match_tag(tag_hash) {
-                let index = (pos0 + bit) & self.bucket_mask;
-
-                let bucket = unsafe { self.bucket(index) };
-
-                if unsafe { (*bucket).0 } == key {
-                    break 'hit (bucket, index);
-                }
-            }
-
-            // Probe second group for a match.
-            insertion_probe_length = 2; // If we reach here, we've probed 2 groups
-            let pos1 = hash1 as usize & self.aligned_bucket_mask;
-            let group1 = unsafe { Group::load(self.ctrl(pos1)) };
-
-            for bit in group1.match_tag(tag_hash) {
-                let index = (pos1 + bit) & self.bucket_mask;
-
-                let bucket = unsafe { self.bucket(index) };
-
-                if unsafe { (*bucket).0 } == key {
-                    break 'hit (bucket, index);
-                }
-            }
-
-            // Now search for (a path to) an empty slot.
+        let (bucket, index) = 'hit: loop {
             let bucket_index = 'search_empty: loop {
-                self.items += 1;
+                let pos0 = hash0 as usize & self.aligned_bucket_mask;
+                let group0 = unsafe { Group::load(self.ctrl(pos0)) };
 
+                // Probe first group for a match.
+                for bit in group0.match_tag(tag_hash) {
+                    let index = (pos0 + bit) & self.bucket_mask;
+
+                    let bucket = unsafe { self.bucket(index) };
+
+                    if unsafe { (*bucket).0 } == key {
+                        break 'hit (bucket, index);
+                    }
+                }
                 if let Some(insert_slot) = group0.match_empty().lowest_set_bit() {
                     let insert_slot = (pos0 + insert_slot) & self.bucket_mask;
                     insertion_probe_length = 1; // Found in first group
                     break 'search_empty insert_slot;
                 }
+
+                // Probe second group for a match.
+                insertion_probe_length = 2; // If we reach here, we've probed 2 groups
+                let pos1 = hash1 as usize & self.aligned_bucket_mask;
+                let group1 = unsafe { Group::load(self.ctrl(pos1)) };
+
+                for bit in group1.match_tag(tag_hash) {
+                    let index = (pos1 + bit) & self.bucket_mask;
+
+                    let bucket = unsafe { self.bucket(index) };
+
+                    if unsafe { (*bucket).0 } == key {
+                        break 'hit (bucket, index);
+                    }
+                }
+
+                // Now search for (a path to) an empty slot.
                 if let Some(insert_slot) = group1.match_empty().lowest_set_bit() {
                     let insert_slot = (pos1 + insert_slot) & self.bucket_mask;
                     insertion_probe_length = 2; // Found in second group
@@ -205,7 +205,7 @@ impl<V: Copy> HashTable<V> {
                     }
 
                     bfs_read_pos += 1;
-                };  // 'bfs
+                }; // 'bfs
                 while path_index >= 2 {
                     let parent_path_index = (path_index - 2) / N;
                     let parent_bucket_offset = (path_index - 2) % N;
@@ -223,18 +223,17 @@ impl<V: Copy> HashTable<V> {
                     path_index = parent_path_index;
                 }
                 break 'search_empty bucket_index;
-            };  // 'search_empty
+            }; // 'search_empty
 
+            self.items += 1;
             unsafe {
                 self.bucket(bucket_index).write((key, value));
                 self.set_ctrl(bucket_index, tag_hash);
             }
             return (true, bucket_index, insertion_probe_length);
-        };  // 'hit
+        }; // 'hit
         unsafe { (*bucket).1 = value };
         return (false, index, insertion_probe_length);
-
-
     }
 
     #[inline(always)]
@@ -519,7 +518,9 @@ mod tests {
         for _ in 0..num_items {
             let key = loop {
                 let k = rng.u64(1..u64::MAX);
-                if !std_map.contains_key(&k) { break k; }
+                if !std_map.contains_key(&k) {
+                    break k;
+                }
             };
             let value = rng.u64(..);
 
@@ -598,7 +599,7 @@ mod tests {
                     let key = rng.u64(1..300);
                     assert_eq!(cuckoo_table.get(&key).copied(), std_map.get(&key).copied());
                 }
-                _ => unreachable!()
+                _ => unreachable!(),
             }
         }
 
