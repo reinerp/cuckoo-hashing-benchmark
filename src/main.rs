@@ -36,7 +36,16 @@ trait InsertAndErase {
 
 impl InsertAndErase for hashbrown::HashMap<u64, u64> {
     fn insert_and_erase(&mut self, key: u64, value: u64) {
-        self.entry(key).insert(value).remove();
+        // self.entry(key).insert(value).remove();
+        self.insert(key, value);
+        self.remove(&key);
+    }
+}
+
+impl InsertAndErase for hop_hash::HashMap<u64, u64> {
+    fn insert_and_erase(&mut self, key: u64, value: u64) {
+        self.insert(key, value);
+        self.remove(&key);
     }
 }
 
@@ -134,9 +143,6 @@ macro_rules! benchmark_find_miss {
             black_box(found);
             let duration = start.elapsed();
             println!("{:.2} ns/op", duration.as_nanos() as f64 / ITERS as f64);
-            if TRACK_PROBE_LENGTH {
-                table.print_stats();
-            }
         })
     };
 }
@@ -332,7 +338,7 @@ fn main() {
     //     }
     // }
 
-    for lg_mi in [25] {  // Focus on 2^15 for fast testing
+    for lg_mi in [15, 25] {  // Focus on 2^15 for fast testing
         println!("mi: 2^{lg_mi}");
         let mi = 1 << lg_mi;
         for load_factor in [16, 20, 24, 28] {  // Use a single moderate load factor
@@ -363,13 +369,14 @@ fn main() {
                     // if !is_insert_and_erase || load_factor < 6 {
                     //     $benchmark!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n, capacity);
                     // }
-                    // $benchmark!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
+                    $benchmark!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
+                    $benchmark!(hop_hash::HashMap::<u64, u64>, u64)(n, capacity);
                 }
             }
 
             // Disable other benchmarks for now, focus on probe histogram
-            // benchmark_all!(benchmark_find_miss);
-            // benchmark_all!(benchmark_find_hit);
+            benchmark_all!(benchmark_find_miss);
+            benchmark_all!(benchmark_find_hit);
             // benchmark_all!(benchmark_find_latency);
             benchmark_all!(benchmark_insert_and_erase);
 

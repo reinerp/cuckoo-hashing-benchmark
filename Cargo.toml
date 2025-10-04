@@ -7,6 +7,7 @@ edition = "2024"
 cfg-if = "1.0.3"
 fastrand = "2.3.0"
 hashbrown = "0.16.0"
+hop-hash = "0.1"
 
 [features]
 nightly = []

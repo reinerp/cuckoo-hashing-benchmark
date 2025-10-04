@@ -21,6 +21,7 @@ dependencies = [
  "cfg-if",
  "fastrand",
  "hashbrown",
+ "hop-hash",
 ]
 
 [[package]]
@@ -49,5 +50,15 @@ checksum = "5419bdc4f6a9207fbeba6d11b604d481addf78ecd10c11ad51e76c2f6482748d"
 dependencies = [
  "allocator-api2",
  "equivalent",
+ "foldhash",
+]
+
+[[package]]
+name = "hop-hash"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a5ae3ed39d228c6fd2a99c9318f566b4fe106389a236ba618e73d6b8b5f6029"
+dependencies = [
+ "cfg-if",
  "foldhash",
 ]
