@@ -306,33 +306,7 @@ macro_rules! benchmark_insertion_probe_histogram {
 }
 
 fn main() {
-    // {
-    //     let mut rng = fastrand::Rng::with_seed(123);
-    //     let len = 1usize << 28;
-    //     let mut v = (0..len).map(|i| rng.u8(..)).collect::<Vec<_>>();
-    //     const CACHE_LINE_SIZE: usize = 128;
-    //     let mut previous_nanos = 0.0;
-    //     for n_cache_lines in 1..=4 {
-    //         print!("random reads of {} cache lines: ", n_cache_lines);
-    //         std::io::stdout().flush().unwrap();
-    //         let start = Instant::now();
-    //         let mut xor = 0;
-    //         for i in 0..ITERS {
-    //             let first_line = ((rng.usize(..) % len) / CACHE_LINE_SIZE) * CACHE_LINE_SIZE;
-    //             for j in 0..n_cache_lines {
-    //                 xor ^= v[(first_line + j * CACHE_LINE_SIZE) % len];
-    //             }
-    //         }
-    //         black_box(xor);
-    //         let duration = start.elapsed();
-    //         let nanos = duration.as_nanos() as f64 / ITERS as f64;
-    //         let delta = nanos - previous_nanos;
-    //         println!("{:.2} ns/op ({:.2} ns/op incremental)", nanos, delta);
-    //         previous_nanos = nanos;
-    //     }
-    // }
-
-    for lg_mi in [25] {  // Focus on 2^15 for fast testing
+    for lg_mi in [15, 25] {
         println!("mi: 2^{lg_mi}");
         let mi = 1 << lg_mi;
         for load_factor in [16, 20, 24, 28] {  // Use a single moderate load factor
@@ -343,14 +317,14 @@ fn main() {
                 ($benchmark:ident) => {
                     // Our cuckoo tables fail on repeated insert_erase on high load factors. We need to extend
                     // them with BFS and rehashing support. Until then, we skip the benchmarks.
-                    let is_insert_and_erase = std::stringify!($benchmark) == "benchmark_insert_and_erase";
+                    // let is_insert_and_erase = std::stringify!($benchmark) == "benchmark_insert_and_erase";
                     // $benchmark!(aligned_double_hashing_table::HashTable::<u64>, u64)(n, capacity);
                     $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
                     // $benchmark!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
                     $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-                    // $benchmark!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-                    // $benchmark!(direct_simd_quadratic_probing::HashTable::<u64>, u64)(n, capacity);
+                    $benchmark!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    $benchmark!(direct_simd_quadratic_probing::HashTable::<u64>, u64)(n, capacity);
                     // if !is_insert_and_erase || load_factor < 7 {
                     //     $benchmark!(balancing_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     // }
@@ -363,19 +337,18 @@ fn main() {
                     // if !is_insert_and_erase || load_factor < 6 {
                     //     $benchmark!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n, capacity);
                     // }
-                    // $benchmark!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
+                    $benchmark!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
                 }
             }
 
-            // Disable other benchmarks for now, focus on probe histogram
-            // benchmark_all!(benchmark_find_miss);
-            // benchmark_all!(benchmark_find_hit);
-            // benchmark_all!(benchmark_find_latency);
+            benchmark_all!(benchmark_find_miss);
+            benchmark_all!(benchmark_find_hit);
+            benchmark_all!(benchmark_find_latency);
             benchmark_all!(benchmark_insert_and_erase);
 
-            // Run the probe histogram benchmarks
+            // Run the probe histogram benchmarks.
+            // These are only available for some of the types, and may crash with assertion failure on unsupported types.
             // benchmark_all!(benchmark_probe_histogram);
-            // println!();
             // benchmark_all!(benchmark_insertion_probe_histogram);
         }
     }

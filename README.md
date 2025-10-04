@@ -1,19 +1,38 @@
 # cuckoo-hashing-benchmark
-Benchmark for cuckoo hashing
+Benchmark for cuckoo hashing. See [Blog post](https://reiner.org/cuckoo-hashing) for a detailed writeup.
+
+## Running benchmarks
+
+Install Rust from [rustup](https://rustup.rs/).
+
+Install nightly Rust with:
+
+```
+rustup toolchain install nightly
+```
+
+Then run benchmarks:
+
+```
+RUSTFLAGS="-C target-cpu=native" cargo +nightly run --release
+```
+
+To run a subset of benchmarks, comment out the relevant lines of code at the end of `main.rs`. You can also experiment with branchy vs branchless versions by modifying `const ALLOW_EARLY_RETURN` or `const BRANCHLESS` in some of the files.
 
 ## Findings so far
+
+Everything that follows is raw notes. The [Blog post](https://reiner.org/cuckoo-hashing) contains a more polished version of the same informatino.
 
 **Cuckoo hashing** works really well, both in SIMD and non-SIMD context. Improves find_miss, find_hit, and insertion.
 * Big improvement on find_miss and insertion, especially at large load factors, and especially for in-TLB (nearly-in-cache) tables.
 * A nice bonus is that we don't need to check for empty slots; checking for key matches is sufficient. This speeds up find_hit. When in-cache, in fact it can be 100% branchless in the Direct SIMD case, which helps a lot.
-* TODO: BFS loop should be "hash then search", not "search then hash". That avoids redundant hashing operations.
 * For huge tables (out-of-cache, out-of-TLB), insertion is a little slower.
 * Cuckoo actually has *faster* insertion than non-cuckoo, with advantage growing as load factor increases. This relies on being able to compute the "alternative" cuckoo bucket from just the tag array, as is possible with the `base_hash ^ hash(tag)` approach.
 * Unaligned cuckoo hashing seems beneficial
 
-**Indirect SIMD** probing works really well at large load factors, where it improves almost everything. 
+**Indirect SIMD** probing works really well at large load factors, where it improves almost everything relative to scalar. 
 
-**Direct SIMD** probing is an improvement on find_hit, but worse on find_miss and insertion.
+**Direct SIMD** probing is an improvement over Indirect SIMD on find_hit, but worse on find_miss and insertion.
 * The main issue is that it can't probe as fast: indirect SIMD probing (on 1 byte tags) can probe 8-16 values per SIMD instruction, whereas direct SIMD probing on u64 probes 2 values per SIMD instruction. 
 * Also for out-of-cache tables and find_miss/insertion it actually makes *more* cache misses because it fetches 8 bytes per key rather than 1 byte per key.
 
