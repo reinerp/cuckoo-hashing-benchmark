@@ -6,15 +6,10 @@ use std::{alloc::Layout, ptr::NonNull};
 
 use crate::TRACK_PROBE_LENGTH;
 use crate::control::{Group, Tag, TagSliceExt as _};
-use crate::dropper::Dropper;
 use crate::u64_fold_hash_fast::{self, fold_hash_fast};
 use crate::uunwrap::UUnwrap;
 
 pub struct HashTable<V: Copy> {
-    // Mask to get an index from a hash value. The value is one less than the
-    // number of buckets in the table.
-    bucket_mask: usize,
-
     aligned_bucket_mask: usize,
 
     // [Padding], T_n, ..., T1, T0, C0, C1, ...
@@ -22,20 +17,16 @@ pub struct HashTable<V: Copy> {
     ctrl: NonNull<u8>,
 
     // Number of elements in the table, only really used by len()
-    items: usize,
     items_until_growth: usize,
 
     // Seed for the hash function
     seed: u64,
 
     marker: std::marker::PhantomData<V>,
-    rng: fastrand::Rng,
 
     total_probe_length: usize,
     total_insert_probe_length: usize,
     max_insert_probe_length: usize,
-
-    dropper: Dropper,
 }
 
 impl<V: Copy> HashTable<V> {
@@ -64,24 +55,39 @@ impl<V: Copy> HashTable<V> {
         let seed = fastrand::Rng::with_seed(123).u64(..);
         let bucket_mask = num_buckets - 1;
         let aligned_bucket_mask = num_buckets - Group::WIDTH;
-        let items_until_growth = 1 + ((num_buckets * 7) / 8);  // Round up to allow insert/erase exactly at capacity for benchmarks
+        let items_until_growth = (num_buckets * 7) / 8;
         // println!("num_buckets = {}, items_until_growth = {}", num_buckets, items_until_growth);
 
         Self {
-            bucket_mask,
             aligned_bucket_mask,
             ctrl,
-            items: 0,
             items_until_growth,
             seed,
             marker: std::marker::PhantomData,
-            rng: fastrand::Rng::with_seed(123),
             total_probe_length: 0,
             total_insert_probe_length: 0,
             max_insert_probe_length: 0,
-            dropper: Dropper { alloc, layout },
         }
     }
+
+    #[inline(always)]
+    unsafe fn dealloc(ctrl: NonNull<u8>, num_buckets: usize) {
+        let align = std::mem::align_of::<(u64, V)>().max(Group::WIDTH);
+        let bucket_size = std::mem::size_of::<(u64, V)>();
+        let ctrl_offset = (bucket_size * num_buckets).next_multiple_of(align);
+        let size = ctrl_offset + num_buckets;
+        let layout = Layout::from_size_align(size, align).uunwrap();
+        unsafe { std::alloc::dealloc(ctrl.as_ptr().sub(ctrl_offset), layout) };
+    }
+
+    #[inline(always)]
+    fn item_capacity(aligned_bucket_mask: usize) -> usize {
+        ((aligned_bucket_mask + Group::WIDTH) * 7) / 8
+    }
+
+    // Item capacity when doubling:
+    //    (((new_aligned_bucket_mask + Group::WIDTH) * 7) / 8) - (((old_aligned_bucket_mask + Group::WIDTH) * 7) / 8)
+    // =  (new_aligned_bucket_mask - old_aligned_bucket_mask) * 7 / 8
 
     /// Safety: caller promises that there have been no tombstones in the table.
     #[inline(always)]
@@ -90,18 +96,19 @@ impl<V: Copy> HashTable<V> {
         if inserted {
             unsafe {
                 self.set_ctrl(index, Tag::EMPTY);
-                self.items_until_growth += 1;
             }
+            self.items_until_growth += 1;
         }
     }
 
     #[inline(always)]
     pub fn avg_probe_length(&self) -> f64 {
-        self.total_probe_length as f64 / self.items as f64
+        self.total_probe_length as f64 / self.len() as f64
     }
 
+    #[inline(always)]
     pub fn print_stats(&self) {
-        let items = self.items as f64;
+        let items = self.len() as f64;
         println!(
             "  avg_probe_length: {}",
             self.total_probe_length as f64 / items
@@ -118,25 +125,26 @@ impl<V: Copy> HashTable<V> {
 
     #[inline(always)]
     pub fn len(&self) -> usize {
-        self.items
+        Self::item_capacity(self.aligned_bucket_mask) - self.items_until_growth
     }
 
     /// Returns the number of buckets in the table.
     #[inline(always)]
     pub fn num_buckets(&self) -> usize {
-        self.bucket_mask + 1
+        self.aligned_bucket_mask + Group::WIDTH
     }
 
     /// Doubles the table size and redistributes all elements using the efficient
     /// parent-child bucket strategy for power-of-2 sized cuckoo hash tables.
-    // #[inline(never)]
-    // #[cold]
-    #[inline(always)]
-    fn rebucket(&mut self) {
-        let old_num_buckets = self.num_buckets();
+    #[inline(never)]
+    #[cold]
+    // extern "rust-cold"
+    fn rebucket(old_aligned_bucket_mask: usize, old_ctrl: NonNull<u8>, seed: u64) -> NonNull<u8> {
+        let old_num_buckets = old_aligned_bucket_mask + Group::WIDTH;
         let new_num_buckets = old_num_buckets * 2;
         // println!("rebucket {}->{}", old_num_buckets, new_num_buckets);
-        let items_until_growth = (1 + ((new_num_buckets * 7) / 8)) - self.items;
+        let old_items = 1 + ((old_num_buckets * 7) / 8);
+        let items_until_growth = (1 + ((new_num_buckets * 7) / 8)) - old_items;
 
         // Calculate new layout
         let bucket_size = std::mem::size_of::<(u64, V)>();
@@ -169,7 +177,7 @@ impl<V: Copy> HashTable<V> {
 
         let new_bucket_mask = new_num_buckets - 1;
         let new_aligned_bucket_mask = new_num_buckets - Group::WIDTH;
-        let new_bit = new_aligned_bucket_mask ^ self.aligned_bucket_mask;
+        let new_bit = new_aligned_bucket_mask ^ old_aligned_bucket_mask;
         assert!(new_bit.count_ones() == 1);
 
         // println!("aligned_bucket_mask = 0b{:b}, new_aligned_bucket_mask = 0b{:b}, new_bit = 0b{:b}", self.aligned_bucket_mask, new_aligned_bucket_mask, new_bit);
@@ -186,19 +194,18 @@ impl<V: Copy> HashTable<V> {
             // Process each slot in the parent group
             for offset in 0..Group::WIDTH {
                 let old_idx = old_group_base + offset;
-                let old_ctrl = unsafe { *self.ctrl(old_idx) };
+                let tag = unsafe { *Self::ctrl_static(old_ctrl, old_idx) };
 
-                if old_ctrl == Tag::EMPTY {
+                if tag == Tag::EMPTY {
                     break;
                 }
 
-                let (key, value) = unsafe { *self.bucket(old_idx) };
-                let tag = old_ctrl;
+                let (key, value) = unsafe { *Self::bucket_static(old_ctrl, old_idx) };
 
                 // Determine which child group based on the new hash bit
-                let hash0 = fold_hash_fast(key, self.seed);
+                let hash0 = fold_hash_fast(key, seed);
                 let hash1 = hash0 ^ scramble_tag(tag);
-                let hash0_was_used = (hash0 as usize & self.aligned_bucket_mask) == old_group_base;
+                let hash0_was_used = (hash0 as usize & old_aligned_bucket_mask) == old_group_base;
                 let hash = std::hint::select_unpredictable(hash0_was_used, hash0, hash1);
                 let goes_to_child_b = (hash as usize & new_bit) != 0;
 
@@ -216,29 +223,19 @@ impl<V: Copy> HashTable<V> {
             debug_assert!(child_a_pos <= old_group_base + Group::WIDTH);
             debug_assert!(child_b_pos <= old_group_base + old_num_buckets + Group::WIDTH);
         }
-
-        // Update table metadata
-        let old_dropper = std::mem::replace(
-            &mut self.dropper,
-            Dropper {
-                alloc: new_alloc,
-                layout: new_layout,
-            },
-        );
-
-        self.bucket_mask = new_bucket_mask;
-        self.aligned_bucket_mask = new_aligned_bucket_mask;
-        self.ctrl = new_ctrl;
-        self.items_until_growth = items_until_growth;
-
-        // Explicitly drop the old allocation
-        drop(old_dropper);
+        unsafe { Self::dealloc(old_ctrl, old_num_buckets) };
+        new_ctrl
     }
 
     #[inline(always)]
     pub fn insert(&mut self, key: u64, value: V) -> (bool, usize, usize) {
-        if self.items_until_growth == 0 {
-            self.rebucket();
+        const RUN_RESIZE_CHECK: bool = true;
+        if RUN_RESIZE_CHECK && std::hint::unlikely(self.items_until_growth == 0) {
+            self.ctrl = unsafe { Self::rebucket(self.aligned_bucket_mask, self.ctrl, self.seed) };
+            let old_aligned_bucket_mask = self.aligned_bucket_mask;
+            let new_aligned_bucket_mask = old_aligned_bucket_mask | (old_aligned_bucket_mask << 1);
+            self.items_until_growth = (new_aligned_bucket_mask - old_aligned_bucket_mask) * 7 / 8;
+            self.aligned_bucket_mask = new_aligned_bucket_mask;
         }
         let hash0 = fold_hash_fast(key, self.seed);
         let tag_hash = Tag::full(hash0);
@@ -254,7 +251,7 @@ impl<V: Copy> HashTable<V> {
 
                 // Probe first group for a match.
                 for bit in group0.match_tag(tag_hash) {
-                    let index = (pos0 + bit) & self.bucket_mask;
+                    let index = pos0 + bit;
 
                     let bucket = unsafe { self.bucket(index) };
 
@@ -269,7 +266,7 @@ impl<V: Copy> HashTable<V> {
                 let group1 = unsafe { Group::load(self.ctrl(pos1)) };
 
                 for bit in group1.match_tag(tag_hash) {
-                    let index = (pos1 + bit) & self.bucket_mask;
+                    let index = pos1 + bit;
 
                     let bucket = unsafe { self.bucket(index) };
 
@@ -280,12 +277,12 @@ impl<V: Copy> HashTable<V> {
 
                 // Now search for (a path to) an empty slot.
                 if let Some(insert_slot) = group0.match_empty().lowest_set_bit() {
-                    let insert_slot = (pos0 + insert_slot) & self.bucket_mask;
+                    let insert_slot = pos0 + insert_slot;
                     insertion_probe_length = 1; // Found in first group
                     break 'search_empty insert_slot;
                 }
                 if let Some(insert_slot) = group1.match_empty().lowest_set_bit() {
-                    let insert_slot = (pos1 + insert_slot) & self.bucket_mask;
+                    let insert_slot = pos1 + insert_slot;
                     insertion_probe_length = 2; // Found in second group
                     break 'search_empty insert_slot;
                 }
@@ -309,7 +306,8 @@ impl<V: Copy> HashTable<V> {
 
                     let bfs_write_pos = bfs_read_pos * N + 2;
                     if bfs_write_pos >= BFS_MAX_LEN {
-                        panic!("Failed to insert into cuckoo table; need to rehash, items_until_growth = {}, items = {}, num_buckets = {}", self.items_until_growth, self.items, self.num_buckets());
+                        panic!();
+                        // panic!("Failed to insert into cuckoo table; need to rehash, items_until_growth = {}, items = {}, num_buckets = {}", self.items_until_growth, self.len(), self.num_buckets());
                     }
 
                     for i in 0..N {
@@ -352,7 +350,6 @@ impl<V: Copy> HashTable<V> {
                 break 'search_empty bucket_index;
             }; // 'search_empty
 
-            self.items += 1;
             self.items_until_growth -= 1;
             unsafe {
                 self.bucket(bucket_index).write((key, value));
@@ -378,7 +375,7 @@ impl<V: Copy> HashTable<V> {
             // println!("searching for key at bucket {}", pos);
             let group = unsafe { Group::load(self.ctrl(pos)) };
             for bit in group.match_tag(tag_hash) {
-                let index = (pos + bit) & self.bucket_mask; // TODO: bucket_mask not required, since aligned
+                let index = pos + bit;
 
                 let bucket = unsafe { self.bucket(index) };
 
@@ -418,7 +415,7 @@ impl<V: Copy> HashTable<V> {
             let group = unsafe { Group::load(self.ctrl(pos)) };
 
             for bit in group.match_tag(tag_hash) {
-                let index = (pos + bit) & self.bucket_mask;
+                let index = pos + bit;
                 let bucket = unsafe { self.bucket(index) };
                 if unsafe { (*bucket).0 } == key {
                     return (probe_count, true); // Key found
@@ -440,33 +437,40 @@ impl<V: Copy> HashTable<V> {
 
     #[inline(always)]
     pub unsafe fn erase_index(&mut self, index: usize) {
-        let index_before = index.wrapping_sub(Group::WIDTH) & self.bucket_mask;
-        let empty_before = Group::load(self.ctrl(index_before)).match_empty();
-        let empty_after = Group::load(self.ctrl(index)).match_empty();
-        let ctrl = if empty_before.leading_zeros() + empty_after.trailing_zeros() >= Group::WIDTH {
-            Tag::DELETED
-        } else {
-            Tag::EMPTY
-        };
-        self.set_ctrl(index, ctrl);
-        self.items -= 1;
+        self.set_ctrl(index, Tag::EMPTY);
         self.items_until_growth += 1;
     }
 
     #[inline(always)]
     unsafe fn ctrl(&self, index: usize) -> *mut Tag {
-        self.ctrl.as_ptr().add(index).cast()
+        Self::ctrl_static(self.ctrl, index)
+    }
+
+    #[inline(always)]
+    unsafe fn ctrl_static(ctrl: NonNull<u8>, index: usize) -> *mut Tag {
+        ctrl.as_ptr().add(index).cast()
     }
 
     #[inline(always)]
     unsafe fn bucket(&self, index: usize) -> *mut (u64, V) {
-        let data_end: *mut (u64, V) = self.ctrl.as_ptr().cast();
+        Self::bucket_static(self.ctrl, index)
+    }
+
+    #[inline(always)]
+    unsafe fn bucket_static(ctrl: NonNull<u8>, index: usize) -> *mut (u64, V) {
+        let data_end: *mut (u64, V) = ctrl.as_ptr().cast();
         data_end.sub(index + 1)
     }
 
     #[inline(always)]
     unsafe fn set_ctrl(&self, index: usize, tag: Tag) {
         *self.ctrl(index) = tag;
+    }
+}
+
+impl<V: Copy> Drop for HashTable<V> {
+    fn drop(&mut self) {
+        unsafe { Self::dealloc(self.ctrl, self.num_buckets()) };
     }
 }
 

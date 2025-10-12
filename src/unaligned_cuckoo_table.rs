@@ -358,15 +358,7 @@ impl<V> HashTable<V> {
 
     #[inline(always)]
     pub unsafe fn erase_index(&mut self, index: usize) {
-        let index_before = index.wrapping_sub(Group::WIDTH) & self.bucket_mask;
-        let empty_before = Group::load(self.ctrl(index_before)).match_empty();
-        let empty_after = Group::load(self.ctrl(index)).match_empty();
-        let ctrl = if empty_before.leading_zeros() + empty_after.trailing_zeros() >= Group::WIDTH {
-            Tag::DELETED
-        } else {
-            Tag::EMPTY
-        };
-        self.set_ctrl(index, ctrl);
+        self.set_ctrl(index, Tag::EMPTY);
         self.items -= 1;
 
     }

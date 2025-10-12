@@ -1,6 +1,7 @@
 #![allow(unused)]
 #![allow(unsafe_op_in_unsafe_fn)]
 #![feature(likely_unlikely)]
+#![feature(rust_cold_cc)]
 use std::{hint::black_box, io::Write, time::Instant};
 
 mod aligned_cuckoo_table;
@@ -230,6 +231,7 @@ macro_rules! benchmark_insert_and_erase {
                     unsafe { table.insert_and_erase(key, <$v>::default()) };
                 }
             }
+            black_box(table.len());
             let duration = start.elapsed();
             println!(
                 "{:.2} ns/op",
@@ -337,7 +339,7 @@ fn main() {
         let mi = 1 << lg_mi;
         for load_factor in [16, 20, 24, 28] {  // Use a single moderate load factor
             println!("load factor: {:.1}%", load_factor as f64 / 32.0 * 100.0);
-            let n = mi * load_factor / 32;
+            let n = (mi * load_factor / 32) - 1;
             let capacity = mi * 7 / 8;
             macro_rules! benchmark_all {
                 ($benchmark:ident) => {
