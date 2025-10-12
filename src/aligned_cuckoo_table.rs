@@ -23,6 +23,7 @@ pub struct HashTable<V: Copy> {
 
     // Number of elements in the table, only really used by len()
     items: usize,
+    items_until_growth: usize,
 
     // Seed for the hash function
     seed: u64,
@@ -38,6 +39,11 @@ pub struct HashTable<V: Copy> {
 }
 
 impl<V: Copy> HashTable<V> {
+    /// Create a new hash table with a small initial capacity that will grow as needed.
+    pub fn new() -> Self {
+        Self::with_capacity(16)
+    }
+
     pub fn with_capacity(capacity: usize) -> Self {
         // Calculate sizes
         // TODO: integer overflow...
@@ -58,12 +64,15 @@ impl<V: Copy> HashTable<V> {
         let seed = fastrand::Rng::with_seed(123).u64(..);
         let bucket_mask = num_buckets - 1;
         let aligned_bucket_mask = num_buckets - Group::WIDTH;
+        let items_until_growth = 1 + ((num_buckets * 7) / 8);  // Round up to allow insert/erase exactly at capacity for benchmarks
+        // println!("num_buckets = {}, items_until_growth = {}", num_buckets, items_until_growth);
 
         Self {
             bucket_mask,
             aligned_bucket_mask,
             ctrl,
             items: 0,
+            items_until_growth,
             seed,
             marker: std::marker::PhantomData,
             rng: fastrand::Rng::with_seed(123),
@@ -81,6 +90,7 @@ impl<V: Copy> HashTable<V> {
         if inserted {
             unsafe {
                 self.set_ctrl(index, Tag::EMPTY);
+                self.items_until_growth += 1;
             }
         }
     }
@@ -111,8 +121,125 @@ impl<V: Copy> HashTable<V> {
         self.items
     }
 
+    /// Returns the number of buckets in the table.
+    #[inline(always)]
+    pub fn num_buckets(&self) -> usize {
+        self.bucket_mask + 1
+    }
+
+    /// Doubles the table size and redistributes all elements using the efficient
+    /// parent-child bucket strategy for power-of-2 sized cuckoo hash tables.
+    // #[inline(never)]
+    // #[cold]
+    #[inline(always)]
+    fn rebucket(&mut self) {
+        let old_num_buckets = self.num_buckets();
+        let new_num_buckets = old_num_buckets * 2;
+        // println!("rebucket {}->{}", old_num_buckets, new_num_buckets);
+        let items_until_growth = (1 + ((new_num_buckets * 7) / 8)) - self.items;
+
+        // Calculate new layout
+        let bucket_size = std::mem::size_of::<(u64, V)>();
+        let align = std::mem::align_of::<(u64, V)>().max(Group::WIDTH);
+        let new_ctrl_offset = (bucket_size * new_num_buckets).next_multiple_of(align);
+        let new_size = new_ctrl_offset + new_num_buckets;
+        let new_layout = Layout::from_size_align(new_size, align).uunwrap();
+
+        // Allocate new table
+        let new_alloc = unsafe { std::alloc::alloc(new_layout) };
+        let new_ctrl = unsafe { NonNull::new_unchecked(new_alloc.add(new_ctrl_offset)) };
+        let new_ctrl_slice =
+            unsafe { std::slice::from_raw_parts_mut(new_ctrl.as_ptr() as *mut Tag, new_num_buckets) };
+        new_ctrl_slice.fill_empty();  // TODO: optimize
+
+        // Helper to access buckets in new table
+        let new_bucket = |index: usize| -> *mut (u64, V) {
+            let data_end: *mut (u64, V) = new_ctrl.as_ptr().cast();
+            unsafe { data_end.sub(index + 1) }
+        };
+
+        let new_ctrl_ptr = |index: usize| -> *mut Tag {
+            unsafe { new_ctrl.as_ptr().add(index).cast() }
+        };
+
+        // Efficient group-based rebucketing for aligned cuckoo tables.
+        // Process each group in the old table and split elements into two child groups.
+        let new_aligned_bucket_mask = new_num_buckets - Group::WIDTH;
+        let old_num_groups = old_num_buckets / Group::WIDTH;
+
+        let new_bucket_mask = new_num_buckets - 1;
+        let new_aligned_bucket_mask = new_num_buckets - Group::WIDTH;
+        let new_bit = new_aligned_bucket_mask ^ self.aligned_bucket_mask;
+        assert!(new_bit.count_ones() == 1);
+
+        // println!("aligned_bucket_mask = 0b{:b}, new_aligned_bucket_mask = 0b{:b}, new_bit = 0b{:b}", self.aligned_bucket_mask, new_aligned_bucket_mask, new_bit);
+
+        for old_group_idx in 0..old_num_groups {
+            let old_group_base = old_group_idx * Group::WIDTH;
+
+            // The two child groups for this parent group:
+            // Child A: same position in new table
+            // Child B: offset by old_num_buckets
+            let mut child_a_pos = old_group_base;
+            let mut child_b_pos = old_group_base + old_num_buckets;
+
+            // Process each slot in the parent group
+            for offset in 0..Group::WIDTH {
+                let old_idx = old_group_base + offset;
+                let old_ctrl = unsafe { *self.ctrl(old_idx) };
+
+                if old_ctrl == Tag::EMPTY {
+                    break;
+                }
+
+                let (key, value) = unsafe { *self.bucket(old_idx) };
+                let tag = old_ctrl;
+
+                // Determine which child group based on the new hash bit
+                let hash0 = fold_hash_fast(key, self.seed);
+                let hash1 = hash0 ^ scramble_tag(tag);
+                let hash0_was_used = (hash0 as usize & self.aligned_bucket_mask) == old_group_base;
+                let hash = std::hint::select_unpredictable(hash0_was_used, hash0, hash1);
+                let goes_to_child_b = (hash as usize & new_bit) != 0;
+
+                let target_idx = std::hint::select_unpredictable(goes_to_child_b, child_b_pos, child_a_pos);
+                unsafe {
+                    new_bucket(target_idx).write((key, value));
+                    *new_ctrl_ptr(target_idx) = tag;
+                }
+                // println!("moved key {} to bucket {}. hash0_was_used = {}, goes_to_child_b = {}, hash0 = 0b{:b}, hash1 = 0b{:b}", key, target_idx, hash0_was_used, goes_to_child_b, hash0 as usize & new_aligned_bucket_mask, hash1 as usize & new_aligned_bucket_mask);
+                child_a_pos += (!goes_to_child_b) as usize;
+                child_b_pos += goes_to_child_b as usize;
+            }
+
+            // Both children should have at most Group::WIDTH elements
+            debug_assert!(child_a_pos <= old_group_base + Group::WIDTH);
+            debug_assert!(child_b_pos <= old_group_base + old_num_buckets + Group::WIDTH);
+        }
+
+        // Update table metadata
+        let old_dropper = std::mem::replace(
+            &mut self.dropper,
+            Dropper {
+                alloc: new_alloc,
+                layout: new_layout,
+            },
+        );
+
+        self.bucket_mask = new_bucket_mask;
+        self.aligned_bucket_mask = new_aligned_bucket_mask;
+        self.ctrl = new_ctrl;
+        self.items_until_growth = items_until_growth;
+
+        // Explicitly drop the old allocation
+        drop(old_dropper);
+    }
+
     #[inline(always)]
     pub fn insert(&mut self, key: u64, value: V) -> (bool, usize, usize) {
+        if self.items_until_growth == 0 {
+            self.rebucket();
+        }
         let hash0 = fold_hash_fast(key, self.seed);
         let tag_hash = Tag::full(hash0);
         let hash1 = hash0 ^ scramble_tag(tag_hash);
@@ -135,11 +262,6 @@ impl<V: Copy> HashTable<V> {
                         break 'hit (bucket, index);
                     }
                 }
-                if let Some(insert_slot) = group0.match_empty().lowest_set_bit() {
-                    let insert_slot = (pos0 + insert_slot) & self.bucket_mask;
-                    insertion_probe_length = 1; // Found in first group
-                    break 'search_empty insert_slot;
-                }
 
                 // Probe second group for a match.
                 insertion_probe_length = 2; // If we reach here, we've probed 2 groups
@@ -157,6 +279,11 @@ impl<V: Copy> HashTable<V> {
                 }
 
                 // Now search for (a path to) an empty slot.
+                if let Some(insert_slot) = group0.match_empty().lowest_set_bit() {
+                    let insert_slot = (pos0 + insert_slot) & self.bucket_mask;
+                    insertion_probe_length = 1; // Found in first group
+                    break 'search_empty insert_slot;
+                }
                 if let Some(insert_slot) = group1.match_empty().lowest_set_bit() {
                     let insert_slot = (pos1 + insert_slot) & self.bucket_mask;
                     insertion_probe_length = 2; // Found in second group
@@ -182,7 +309,7 @@ impl<V: Copy> HashTable<V> {
 
                     let bfs_write_pos = bfs_read_pos * N + 2;
                     if bfs_write_pos >= BFS_MAX_LEN {
-                        panic!("Failed to insert into cuckoo table; need to rehash");
+                        panic!("Failed to insert into cuckoo table; need to rehash, items_until_growth = {}, items = {}, num_buckets = {}", self.items_until_growth, self.items, self.num_buckets());
                     }
 
                     for i in 0..N {
@@ -226,10 +353,12 @@ impl<V: Copy> HashTable<V> {
             }; // 'search_empty
 
             self.items += 1;
+            self.items_until_growth -= 1;
             unsafe {
                 self.bucket(bucket_index).write((key, value));
                 self.set_ctrl(bucket_index, tag_hash);
             }
+            // println!("inserted key {} at bucket {} of {}. hash0 = {}, hash1 = {}", key, bucket_index, self.num_buckets(), hash0 as usize & self.aligned_bucket_mask, hash1 as usize & self.aligned_bucket_mask);
             return (true, bucket_index, insertion_probe_length);
         }; // 'hit
         unsafe { (*bucket).1 = value };
@@ -246,6 +375,7 @@ impl<V: Copy> HashTable<V> {
         // First group
         loop {
             let pos = hash64 as usize & self.aligned_bucket_mask;
+            // println!("searching for key at bucket {}", pos);
             let group = unsafe { Group::load(self.ctrl(pos)) };
             for bit in group.match_tag(tag_hash) {
                 let index = (pos + bit) & self.bucket_mask; // TODO: bucket_mask not required, since aligned
@@ -320,6 +450,7 @@ impl<V: Copy> HashTable<V> {
         };
         self.set_ctrl(index, ctrl);
         self.items -= 1;
+        self.items_until_growth += 1;
     }
 
     #[inline(always)]
@@ -608,6 +739,146 @@ mod tests {
 
         for (&key, &value) in &std_map {
             assert_eq!(cuckoo_table.get(&key), Some(&value));
+        }
+    }
+
+    #[test]
+    fn test_rebucketing_small_to_medium() {
+        let mut cuckoo_table_entries = Vec::new();
+        let mut cuckoo_table = HashTable::new(); // Start with small initial capacity
+        let mut std_map = HashMap::new();
+        let mut rng = fastrand::Rng::with_seed(54321);
+
+        // Insert enough elements to trigger multiple rebucketing operations
+        let num_items = 50;
+
+        for _ in 0..num_items {
+            let key = loop {
+                let k = rng.u64(1..u64::MAX);
+                if !std_map.contains_key(&k) {
+                    break k;
+                }
+            };
+            let value = rng.u64(..);
+
+            cuckoo_table_entries.push((key, value));
+            let (cuckoo_inserted, _, _) = cuckoo_table.insert(key, value);
+            let std_inserted = std_map.insert(key, value).is_none();
+
+            assert_eq!(cuckoo_inserted, std_inserted);
+        }
+
+        // Verify length
+        assert_eq!(cuckoo_table.len(), std_map.len());
+        assert_eq!(cuckoo_table.len(), num_items);
+
+        // Verify all elements are correctly stored
+        for (key, expected_value) in &cuckoo_table_entries {
+            // println!("verifying key {}", key);
+            assert_eq!(cuckoo_table.get(&key), Some(expected_value));
+        }
+
+        // Verify non-existent keys return None
+        for _ in 0..20 {
+            let key = loop {
+                let k = rng.u64(1..u64::MAX);
+                if !std_map.contains_key(&k) {
+                    break k;
+                }
+            };
+            assert_eq!(cuckoo_table.get(&key), None);
+        }
+    }
+
+    #[test]
+    fn test_rebucketing_updates_during_growth() {
+        let mut cuckoo_table = HashTable::new();
+        let mut std_map = HashMap::new();
+        let mut rng = fastrand::Rng::with_seed(98765);
+
+        // Insert initial batch
+        for i in 1..=50 {
+            cuckoo_table.insert(i, i * 10);
+            std_map.insert(i, i * 10);
+        }
+
+        // Update some values
+        for i in 1..=25 {
+            let new_value = rng.u64(..);
+            let (cuckoo_inserted, _, _) = cuckoo_table.insert(i, new_value);
+            let std_existed = std_map.insert(i, new_value).is_some();
+            assert_eq!(cuckoo_inserted, !std_existed);
+        }
+
+        // Insert more elements to trigger rebucketing
+        for i in 51..=150 {
+            let value = i * 100;
+            cuckoo_table.insert(i, value);
+            std_map.insert(i, value);
+        }
+
+        // Verify everything
+        assert_eq!(cuckoo_table.len(), std_map.len());
+
+        for (&key, &expected_value) in &std_map {
+            assert_eq!(cuckoo_table.get(&key), Some(&expected_value));
+        }
+    }
+
+    #[test]
+    fn test_multiple_successive_rebucketings() {
+        let mut cuckoo_table = HashTable::new();
+        let mut std_map = HashMap::new();
+        let mut rng = fastrand::Rng::with_seed(11111);
+
+        // Insert a large number of elements to trigger multiple rebucketings
+        let num_items = 500;
+
+        for _ in 0..num_items {
+            let key = loop {
+                let k = rng.u64(1..u64::MAX);
+                if !std_map.contains_key(&k) {
+                    break k;
+                }
+            };
+            let value = rng.u64(..);
+
+            cuckoo_table.insert(key, value);
+            std_map.insert(key, value);
+
+            // Periodically verify correctness during growth
+            if std_map.len() % 50 == 0 {
+                // Verify a random subset of keys
+                for (&k, &v) in std_map.iter().take(10) {
+                    assert_eq!(cuckoo_table.get(&k), Some(&v));
+                }
+            }
+        }
+
+        // Final verification
+        assert_eq!(cuckoo_table.len(), std_map.len());
+        assert_eq!(cuckoo_table.len(), num_items);
+
+        for (&key, &expected_value) in &std_map {
+            assert_eq!(cuckoo_table.get(&key), Some(&expected_value));
+        }
+    }
+
+    #[test]
+    fn test_rebucketing_preserves_all_elements() {
+        let mut cuckoo_table = HashTable::new();
+        let keys: Vec<u64> = (1..=200).collect();
+
+        // Insert sequential keys
+        for &key in &keys {
+            cuckoo_table.insert(key, key * 2);
+        }
+
+        // Verify all keys are present
+        assert_eq!(cuckoo_table.len(), keys.len());
+
+        for &key in &keys {
+            assert_eq!(cuckoo_table.get(&key), Some(&(key * 2)));
         }
     }
 }

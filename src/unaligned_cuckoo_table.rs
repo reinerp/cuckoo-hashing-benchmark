@@ -400,7 +400,7 @@ mod tests {
         let mut table = HashTable::with_capacity(16);
 
         // Test basic insertion
-        let (inserted, _) = table.insert(42, 100);
+        let (inserted, _, _) = table.insert(42, 100);
         assert!(inserted);
         assert_eq!(table.len(), 1);
 
@@ -414,12 +414,12 @@ mod tests {
         let mut table = HashTable::with_capacity(16);
 
         // Insert initial value
-        let (inserted, _) = table.insert(123, 456);
+        let (inserted, _, _) = table.insert(123, 456);
         assert!(inserted);
         assert_eq!(table.len(), 1);
 
         // Update with new value
-        let (inserted, _) = table.insert(123, 789);
+        let (inserted, _, _) = table.insert(123, 789);
         assert!(!inserted); // Should be false since key already existed
         assert_eq!(table.len(), 1); // Length should remain the same
 
@@ -433,7 +433,7 @@ mod tests {
 
         // Insert multiple values
         for i in 1..=20 {
-            let (inserted, _) = table.insert(i, i * 10);
+            let (inserted, _, _) = table.insert(i, i * 10);
             assert!(inserted);
         }
 
@@ -541,7 +541,7 @@ mod tests {
         ];
 
         for &key in &test_keys {
-            let (inserted, _) = table.insert(key, key);
+            let (inserted, _, _) = table.insert(key, key);
             assert!(inserted);
         }
 
@@ -595,7 +595,7 @@ mod tests {
         for round in 1..=3 {
             for i in 1..=10 {
                 let new_value = i * 100 * round;
-                let (cuckoo_inserted, _) = cuckoo_table.insert(i, new_value);
+                let (cuckoo_inserted, _, _) = cuckoo_table.insert(i, new_value);
                 let std_existed = std_map.insert(i, new_value).is_some();
 
                 assert!(!cuckoo_inserted); // Should be update, not insert
@@ -666,7 +666,7 @@ mod tests {
         let mut failed_keys = Vec::new();
         for i in 0..n {
             let key = i as u64;
-            let (inserted, _) = table.insert(key, key);
+            let (inserted, _, _) = table.insert(key, key);
             if !inserted {
                 // This means key already existed, which shouldn't happen with sequential keys
                 println!("WARNING: Key {} was already in table!", key);
@@ -697,7 +697,7 @@ mod tests {
 
         // Try to insert way more than capacity (should fail)
         for i in 0..50 {
-            let (inserted, _) = table.insert(i, i);
+            let (inserted, _, _) = table.insert(i, i);
             println!("Inserted key {}: {}", i, inserted);
         }
     }

@@ -243,7 +243,7 @@ mod tests {
         let mut table = HashTable::with_capacity(16);
 
         // Test basic insertion
-        let (inserted, _) = table.insert(42, "hello");
+        let (inserted, _, _) = table.insert(42, "hello");
         assert!(inserted);
         assert_eq!(table.len(), 1);
 
@@ -257,7 +257,7 @@ mod tests {
         let mut table = HashTable::with_capacity(16);
 
         // Test zero key insertion
-        let (inserted, _) = table.insert(0, "zero");
+        let (inserted, _, _) = table.insert(0, "zero");
         assert!(inserted);
         assert_eq!(table.len(), 1);
 
@@ -270,12 +270,12 @@ mod tests {
         let mut table = HashTable::with_capacity(16);
 
         // Insert initial value
-        let (inserted, _) = table.insert(123, "first");
+        let (inserted, _, _) = table.insert(123, "first");
         assert!(inserted);
         assert_eq!(table.len(), 1);
 
         // Update with new value
-        let (inserted, _) = table.insert(123, "updated");
+        let (inserted, _, _) = table.insert(123, "updated");
         assert!(!inserted); // Should be false since key already existed
         assert_eq!(table.len(), 1); // Length should remain the same
 
@@ -289,7 +289,7 @@ mod tests {
 
         // Insert multiple values
         for i in 1..=20 {
-            let (inserted, _) = table.insert(i, i * 10);
+            let (inserted, _, _) = table.insert(i, i * 10);
             assert!(inserted);
         }
 
@@ -309,7 +309,7 @@ mod tests {
         let keys = [1, 17, 33, 49, 65, 81, 97]; // These may collide depending on hash function
 
         for &key in &keys {
-            let (inserted, _) = table.insert(key, key * 100);
+            let (inserted, _, _) = table.insert(key, key * 100);
             assert!(inserted);
         }
 

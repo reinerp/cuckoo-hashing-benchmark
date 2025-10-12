@@ -239,6 +239,32 @@ macro_rules! benchmark_insert_and_erase {
     };
 }
 
+macro_rules! benchmark_build_unreserved {
+    ($table:ty, $v:ty) => {
+        (|n: usize, capacity: usize| {
+            _ = capacity;
+            print!("build_unreserved  {}/{n}: ", drop_spaces(stringify!($table)));
+            std::io::stdout().flush().unwrap();
+            let outer_iters = (ITERS / 8).div_ceil(n);
+            let true_iters = outer_iters * n;
+            let mut rng = fastrand::Rng::with_seed(124);
+            let start = Instant::now();
+            let mut table = <$table>::new();
+            for _ in 0..outer_iters {
+                for _ in 0..n {
+                    let key = rng.u64(..);
+                    table.insert(key, <$v>::default());
+                }
+            }
+            let duration = start.elapsed();
+            println!(
+                "{:.2} ns/op",
+                duration.as_nanos() as f64 / true_iters as f64
+            );
+        })
+    };
+}
+
 macro_rules! benchmark_probe_histogram {
     ($table:ty, $v:ty) => {
         (|n: usize, capacity: usize| {
@@ -321,10 +347,10 @@ fn main() {
                     // $benchmark!(aligned_double_hashing_table::HashTable::<u64>, u64)(n, capacity);
                     $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
                     // $benchmark!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
-                    $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    // $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-                    $benchmark!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-                    $benchmark!(direct_simd_quadratic_probing::HashTable::<u64>, u64)(n, capacity);
+                    // $benchmark!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    // $benchmark!(direct_simd_quadratic_probing::HashTable::<u64>, u64)(n, capacity);
                     // if !is_insert_and_erase || load_factor < 7 {
                     //     $benchmark!(balancing_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     // }
@@ -341,15 +367,18 @@ fn main() {
                 }
             }
 
-            benchmark_all!(benchmark_find_miss);
-            benchmark_all!(benchmark_find_hit);
-            benchmark_all!(benchmark_find_latency);
+            // benchmark_all!(benchmark_find_miss);
+            // benchmark_all!(benchmark_find_hit);
+            // benchmark_all!(benchmark_find_latency);
             benchmark_all!(benchmark_insert_and_erase);
 
             // Run the probe histogram benchmarks.
             // These are only available for some of the types, and may crash with assertion failure on unsupported types.
             // benchmark_all!(benchmark_probe_histogram);
             // benchmark_all!(benchmark_insertion_probe_histogram);
+            
+            benchmark_build_unreserved!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_build_unreserved!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
         }
     }
 }
