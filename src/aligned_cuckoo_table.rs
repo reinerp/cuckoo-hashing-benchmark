@@ -198,14 +198,12 @@ impl<V: Copy> HashTable<V> {
             }
 
 
+            let num_full = unsafe { Group::load(Self::ctrl_static(old_ctrl, old_group_base)) }.match_empty().lowest_set_bit().unwrap_or(Group::WIDTH);
+
             // Process each slot in the parent group
-            for offset in 0..Group::WIDTH {
+            for offset in 0..num_full {
                 let old_idx = old_group_base + offset;
                 let tag = unsafe { *Self::ctrl_static(old_ctrl, old_idx) };
-
-                if tag == Tag::EMPTY {
-                    break;
-                }
 
                 let (key, value) = unsafe { *Self::bucket_static(old_ctrl, old_idx) };
 
