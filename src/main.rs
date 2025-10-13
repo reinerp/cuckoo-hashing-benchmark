@@ -249,14 +249,15 @@ macro_rules! benchmark_build_unreserved {
             std::io::stdout().flush().unwrap();
             let outer_iters = (ITERS / 8).div_ceil(n);
             let true_iters = outer_iters * n;
-            let mut rng = fastrand::Rng::with_seed(124);
             let start = Instant::now();
-            let mut table = <$table>::new();
             for _ in 0..outer_iters {
+                let mut table = black_box(<$table>::new());
+                let mut rng = fastrand::Rng::with_seed(124);
                 for _ in 0..n {
                     let key = rng.u64(..);
                     table.insert(key, <$v>::default());
                 }
+                black_box(table.len());
             }
             let duration = start.elapsed();
             println!(
