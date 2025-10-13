@@ -268,6 +268,33 @@ macro_rules! benchmark_build_unreserved {
     };
 }
 
+macro_rules! benchmark_build_reserved {
+    ($table:ty, $v:ty) => {
+        (|n: usize, capacity: usize| {
+            _ = capacity;
+            print!("build_reserved  {}/{n}: ", drop_spaces(stringify!($table)));
+            std::io::stdout().flush().unwrap();
+            let outer_iters = (ITERS / 8).div_ceil(n);
+            let true_iters = outer_iters * n;
+            let start = Instant::now();
+            for _ in 0..outer_iters {
+                let mut table = black_box(<$table>::with_capacity(capacity));
+                let mut rng = fastrand::Rng::with_seed(124);
+                for _ in 0..n {
+                    let key = rng.u64(..);
+                    table.insert(key, <$v>::default());
+                }
+                black_box(table.len());
+            }
+            let duration = start.elapsed();
+            println!(
+                "{:.2} ns/op",
+                duration.as_nanos() as f64 / true_iters as f64
+            );
+        })
+    };
+}
+
 macro_rules! benchmark_probe_histogram {
     ($table:ty, $v:ty) => {
         (|n: usize, capacity: usize| {
@@ -382,6 +409,9 @@ fn main() {
             
             benchmark_build_unreserved!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
             benchmark_build_unreserved!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
+
+            benchmark_build_reserved!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_build_reserved!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
         }
     }
 }
