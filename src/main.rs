@@ -372,7 +372,7 @@ fn main() {
             // benchmark_all!(benchmark_find_miss);
             // benchmark_all!(benchmark_find_hit);
             // benchmark_all!(benchmark_find_latency);
-            benchmark_all!(benchmark_insert_and_erase);
+            // benchmark_all!(benchmark_insert_and_erase);
 
             // Run the probe histogram benchmarks.
             // These are only available for some of the types, and may crash with assertion failure on unsupported types.

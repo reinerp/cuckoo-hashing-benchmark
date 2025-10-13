@@ -181,6 +181,7 @@ impl<V: Copy> HashTable<V> {
         assert!(new_bit.count_ones() == 1);
 
         // println!("aligned_bucket_mask = 0b{:b}, new_aligned_bucket_mask = 0b{:b}, new_bit = 0b{:b}", self.aligned_bucket_mask, new_aligned_bucket_mask, new_bit);
+        let empties = unsafe { Group::load(Group::static_empty().as_ptr()) };
 
         for old_group_idx in 0..old_num_groups {
             let old_group_base = old_group_idx * Group::WIDTH;
@@ -190,6 +191,12 @@ impl<V: Copy> HashTable<V> {
             // Child B: offset by old_num_buckets
             let mut child_a_pos = old_group_base;
             let mut child_b_pos = old_group_base + old_num_buckets;
+
+            unsafe {
+                Group::store_aligned(empties, Self::ctrl_static(new_ctrl, child_a_pos));
+                Group::store_aligned(empties, Self::ctrl_static(new_ctrl, child_b_pos));
+            }
+
 
             // Process each slot in the parent group
             for offset in 0..Group::WIDTH {
