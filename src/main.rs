@@ -21,6 +21,7 @@ mod direct_simd_cuckoo_table;
 mod control64;
 mod localized_simd_cuckoo_table;
 mod direct_simd_quadratic_probing;
+mod statically_optimal_aligned_cuckoo_table;
 
 const ITERS: usize = 100_000_000;
 const TRACK_PROBE_LENGTH: bool = false;
@@ -334,7 +335,7 @@ macro_rules! benchmark_probe_histogram {
 
             // Print histograms using shared function
             print_histogram("Present key probe lengths", &present_histogram);
-            print_histogram("Absent key probe lengths", &absent_histogram);
+            // print_histogram("Absent key probe lengths", &absent_histogram);
         })
     };
 }
@@ -365,7 +366,7 @@ fn main() {
     for lg_mi in [15, 25] {
         println!("mi: 2^{lg_mi}");
         let mi = 1 << lg_mi;
-        for load_factor in [16, 20, 24, 28] {  // Use a single moderate load factor
+        for load_factor in [16, 20, 24, 28, 30, 31] {  // Use a single moderate load factor
             println!("load factor: {:.1}%", load_factor as f64 / 32.0 * 100.0);
             let n = (mi * load_factor / 32) - 1;
             let capacity = mi * 7 / 8;
@@ -375,10 +376,11 @@ fn main() {
                     // them with BFS and rehashing support. Until then, we skip the benchmarks.
                     // let is_insert_and_erase = std::stringify!($benchmark) == "benchmark_insert_and_erase";
                     // $benchmark!(aligned_double_hashing_table::HashTable::<u64>, u64)(n, capacity);
-                    $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
+                    // $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
                     // $benchmark!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
-                    // $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-                    $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    // $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                    $benchmark!(statically_optimal_aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     // $benchmark!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
                     // $benchmark!(direct_simd_quadratic_probing::HashTable::<u64>, u64)(n, capacity);
                     // if !is_insert_and_erase || load_factor < 7 {
@@ -393,7 +395,7 @@ fn main() {
                     // if !is_insert_and_erase || load_factor < 6 {
                     //     $benchmark!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n, capacity);
                     // }
-                    $benchmark!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
+                    // $benchmark!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
                 }
             }
 
@@ -404,14 +406,14 @@ fn main() {
 
             // Run the probe histogram benchmarks.
             // These are only available for some of the types, and may crash with assertion failure on unsupported types.
-            // benchmark_all!(benchmark_probe_histogram);
+            benchmark_all!(benchmark_probe_histogram);
             // benchmark_all!(benchmark_insertion_probe_histogram);
             
-            benchmark_build_unreserved!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-            benchmark_build_unreserved!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
+            // benchmark_build_unreserved!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+            // benchmark_build_unreserved!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
 
-            benchmark_build_reserved!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-            benchmark_build_reserved!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
+            // benchmark_build_reserved!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+            // benchmark_build_reserved!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
         }
     }
 }
