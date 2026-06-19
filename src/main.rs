@@ -21,9 +21,19 @@ mod direct_simd_cuckoo_table;
 mod control64;
 mod localized_simd_cuckoo_table;
 mod direct_simd_quadratic_probing;
+mod linear_probing_table;
+mod direct_simd_linear_probing;
+mod direct_simd_linear_probing_np2;
 
-const ITERS: usize = 100_000_000;
+const ITERS: usize = 40_000_000;
 const TRACK_PROBE_LENGTH: bool = false;
+// Toggle which workloads run. The four lookup/churn ops are the main sweep; BENCH_BUILD adds an
+// amortized build-from-empty measurement (insert n distinct keys into a pre-sized table).
+const BENCH_OPS: bool = true;
+const BENCH_BUILD: bool = true;
+// Focus switch: when false, the find workloads are skipped (used to re-measure churn/build in
+// isolation). Set true for the full sweep.
+const RUN_FINDS: bool = true;
 
 trait PrintStats {
     fn print_stats(&self) {}
@@ -82,6 +92,24 @@ impl ProbeLength for quadratic_probing_table::HashTable<u64> {
 }
 
 impl ProbeLength for direct_simd_quadratic_probing::HashTable<u64> {
+    fn probe_length(&self, key: u64) -> (usize, bool) {
+        self.probe_length(key)
+    }
+}
+
+impl ProbeLength for linear_probing_table::HashTable<u64> {
+    fn probe_length(&self, key: u64) -> (usize, bool) {
+        self.probe_length(key)
+    }
+}
+
+impl ProbeLength for direct_simd_linear_probing::HashTable<u64> {
+    fn probe_length(&self, key: u64) -> (usize, bool) {
+        self.probe_length(key)
+    }
+}
+
+impl ProbeLength for direct_simd_linear_probing_np2::HashTable<u64> {
     fn probe_length(&self, key: u64) -> (usize, bool) {
         self.probe_length(key)
     }
@@ -362,56 +390,98 @@ macro_rules! benchmark_insertion_probe_histogram {
 }
 
 fn main() {
-    for lg_mi in [15, 25] {
+    // Head-to-head: LINEAR vs QUADRATIC vs CUCKOO probing, on two layouts (Indirect SIMD =
+    // 1-byte tags + W=8 group; Direct SIMD = aligned [u64;4] cache-line buckets), across cache
+    // residency (2^10 in-cache .. 2^25 far out-of-cache) and load factor (25% .. 87.5%).
+    //
+    // Output is line-per-benchmark "op  table/n: X.YZ ns/op", grouped under "mi:" and
+    // "load factor:" headers, so it can be parsed mechanically.
+    for lg_mi in [10usize, 15, 20, 25] {
         println!("mi: 2^{lg_mi}");
-        let mi = 1 << lg_mi;
-        for load_factor in [16, 20, 24, 28] {  // Use a single moderate load factor
+        let mi = 1usize << lg_mi;
+        let in_cache = lg_mi <= 15; // run latency (branch-sensitive) only where it is meaningful
+        for load_factor in [8usize, 12, 16, 20, 24, 28] {
+            // 25%, 37.5%, 50%, 62.5%, 75%, 87.5%
             println!("load factor: {:.1}%", load_factor as f64 / 32.0 * 100.0);
             let n = (mi * load_factor / 32) - 1;
             let capacity = mi * 7 / 8;
-            macro_rules! benchmark_all {
-                ($benchmark:ident) => {
-                    // Our cuckoo tables fail on repeated insert_erase on high load factors. We need to extend
-                    // them with BFS and rehashing support. Until then, we skip the benchmarks.
-                    // let is_insert_and_erase = std::stringify!($benchmark) == "benchmark_insert_and_erase";
-                    // $benchmark!(aligned_double_hashing_table::HashTable::<u64>, u64)(n, capacity);
-                    $benchmark!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
-                    // $benchmark!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
-                    // $benchmark!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-                    $benchmark!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-                    // $benchmark!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-                    // $benchmark!(direct_simd_quadratic_probing::HashTable::<u64>, u64)(n, capacity);
-                    // if !is_insert_and_erase || load_factor < 7 {
-                    //     $benchmark!(balancing_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-                    // }
-                    // {
-                    //     let n = n * 7 / 8;
-                    //     $benchmark!(localized_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-                    // }
-                    // $benchmark!(scalar_cache_line_aligned_table::U64HashSet::<u64>, u64)(n, capacity);
-                    // $benchmark!(scalar_unaligned_table::U64HashSet::<u64>, u64)(n, capacity);
-                    // if !is_insert_and_erase || load_factor < 6 {
-                    //     $benchmark!(scalar_cuckoo_table::U64HashSet::<u64>, u64)(n, capacity);
-                    // }
-                    $benchmark!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
-                }
+            // Cuckoo insert+erase: now attempted at every load (87.5% included) to complete the
+            // insertion picture; BFS should sustain it (k=2, group width 8 => capacity ~0.99).
+            let cuckoo_insert_ok = true;
+
+            // Full variant set per workload: quad family (unaligned/aligned indirect + direct),
+            // linear (indirect + direct), cuckoo family (aligned/unaligned indirect + direct),
+            // hashbrown reference. Best-of-layouts is taken per strategy in the analysis.
+          if BENCH_OPS && RUN_FINDS {
+            // ---------- FIND_MISS ----------
+            benchmark_find_miss!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_find_miss!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_find_miss!(direct_simd_quadratic_probing::HashTable::<u64>, u64)(n, capacity);
+            benchmark_find_miss!(linear_probing_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_find_miss!(direct_simd_linear_probing::HashTable::<u64>, u64)(n, capacity);
+            benchmark_find_miss!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_find_miss!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_find_miss!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_find_miss!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
+
+            // ---------- FIND_HIT ----------
+            benchmark_find_hit!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_find_hit!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_find_hit!(direct_simd_quadratic_probing::HashTable::<u64>, u64)(n, capacity);
+            benchmark_find_hit!(linear_probing_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_find_hit!(direct_simd_linear_probing::HashTable::<u64>, u64)(n, capacity);
+            benchmark_find_hit!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_find_hit!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_find_hit!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_find_hit!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
+
+            // ---------- FIND_HIT_LATENCY (in-cache only; memory-bound & non-discriminating OOC) ----------
+            if in_cache {
+                benchmark_find_latency!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
+                benchmark_find_latency!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
+                benchmark_find_latency!(direct_simd_quadratic_probing::HashTable::<u64>, u64)(n, capacity);
+                benchmark_find_latency!(linear_probing_table::HashTable::<u64>, u64)(n, capacity);
+                benchmark_find_latency!(direct_simd_linear_probing::HashTable::<u64>, u64)(n, capacity);
+                benchmark_find_latency!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                benchmark_find_latency!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                benchmark_find_latency!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                benchmark_find_latency!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
             }
+          } // BENCH_OPS && RUN_FINDS
 
-            // benchmark_all!(benchmark_find_miss);
-            // benchmark_all!(benchmark_find_hit);
-            // benchmark_all!(benchmark_find_latency);
-            // benchmark_all!(benchmark_insert_and_erase);
+          if BENCH_OPS {
+            // ---------- INSERT_ERASE ----------  (linear = backward-shift; cuckoo = early-exit)
+            benchmark_insert_and_erase!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_insert_and_erase!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_insert_and_erase!(direct_simd_quadratic_probing::HashTable::<u64>, u64)(n, capacity);
+            benchmark_insert_and_erase!(linear_probing_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_insert_and_erase!(direct_simd_linear_probing::HashTable::<u64>, u64)(n, capacity);
+            if cuckoo_insert_ok {
+                benchmark_insert_and_erase!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                // unaligned cuckoo insert+erase: cap at 75% (fixed-cap BFS, no growth headroom).
+                if load_factor <= 24 {
+                    benchmark_insert_and_erase!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+                }
+                benchmark_insert_and_erase!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+            }
+            benchmark_insert_and_erase!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
+          } // BENCH_OPS
 
-            // Run the probe histogram benchmarks.
-            // These are only available for some of the types, and may crash with assertion failure on unsupported types.
-            // benchmark_all!(benchmark_probe_histogram);
-            // benchmark_all!(benchmark_insertion_probe_histogram);
-            
-            benchmark_build_unreserved!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
-            benchmark_build_unreserved!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
-
+          if BENCH_BUILD {
+            // ---------- BUILD_RESERVED (amortized build-from-empty into a pre-sized table) ----------
+            // Quadratic family (all three layouts):
+            benchmark_build_reserved!(quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);          // unaligned indirect
+            benchmark_build_reserved!(aligned_quadratic_probing_table::HashTable::<u64>, u64)(n, capacity);  // aligned indirect
+            benchmark_build_reserved!(direct_simd_quadratic_probing::HashTable::<u64>, u64)(n, capacity);    // direct
+            // Cuckoo family (aligned + unaligned indirect, + direct):
             benchmark_build_reserved!(aligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_build_reserved!(unaligned_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_build_reserved!(direct_simd_cuckoo_table::HashTable::<u64>, u64)(n, capacity);
+            // Linear (for reference):
+            benchmark_build_reserved!(linear_probing_table::HashTable::<u64>, u64)(n, capacity);
+            benchmark_build_reserved!(direct_simd_linear_probing::HashTable::<u64>, u64)(n, capacity);
             benchmark_build_reserved!(hashbrown::HashMap::<u64, u64>, u64)(n, capacity);
+          } // BENCH_BUILD
         }
     }
 }

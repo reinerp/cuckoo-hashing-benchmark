@@ -1,0 +1,244 @@
+mi: 2^10
+load factor: 25.0%
+build_reserved  quadratic_probing_table::HashTable::<u64>/255: 1.89 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/255: 1.57 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/255: 1.98 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/255: 1.51 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/255: 1.87 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/255: 2.00 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/255: 1.93 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/255: 1.94 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/255: 2.43 ns/op
+load factor: 37.5%
+build_reserved  quadratic_probing_table::HashTable::<u64>/383: 1.78 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/383: 1.50 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/383: 1.77 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/383: 1.43 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/383: 1.73 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/383: 1.81 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/383: 1.77 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/383: 1.81 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/383: 2.42 ns/op
+load factor: 50.0%
+build_reserved  quadratic_probing_table::HashTable::<u64>/511: 1.77 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/511: 1.49 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/511: 1.70 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/511: 1.49 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/511: 1.71 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/511: 1.65 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/511: 1.86 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/511: 1.71 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/511: 2.48 ns/op
+load factor: 62.5%
+build_reserved  quadratic_probing_table::HashTable::<u64>/639: 1.99 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/639: 1.57 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/639: 1.67 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/639: 1.49 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/639: 1.80 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/639: 1.66 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/639: 1.90 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/639: 1.65 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/639: 2.62 ns/op
+load factor: 75.0%
+build_reserved  quadratic_probing_table::HashTable::<u64>/767: 2.08 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/767: 1.63 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/767: 1.69 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/767: 1.54 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/767: 1.97 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/767: 1.81 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/767: 1.97 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/767: 1.72 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/767: 3.01 ns/op
+load factor: 87.5%
+build_reserved  quadratic_probing_table::HashTable::<u64>/895: 2.19 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/895: 1.79 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/895: 1.87 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/895: 1.66 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/895: 2.17 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/895: 2.33 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/895: 2.29 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/895: 2.13 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/895: 3.91 ns/op
+mi: 2^15
+load factor: 25.0%
+build_reserved  quadratic_probing_table::HashTable::<u64>/8191: 1.57 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/8191: 1.56 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/8191: 1.85 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/8191: 1.36 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/8191: 1.47 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/8191: 1.86 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/8191: 1.61 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/8191: 1.85 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/8191: 2.18 ns/op
+load factor: 37.5%
+build_reserved  quadratic_probing_table::HashTable::<u64>/12287: 1.68 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/12287: 1.49 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/12287: 1.75 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/12287: 1.41 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/12287: 1.57 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/12287: 1.72 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/12287: 1.61 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/12287: 1.71 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/12287: 2.17 ns/op
+load factor: 50.0%
+build_reserved  quadratic_probing_table::HashTable::<u64>/16383: 1.67 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/16383: 1.50 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/16383: 1.66 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/16383: 1.39 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/16383: 1.57 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/16383: 1.67 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/16383: 1.62 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/16383: 1.67 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/16383: 2.31 ns/op
+load factor: 62.5%
+build_reserved  quadratic_probing_table::HashTable::<u64>/20479: 1.81 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/20479: 1.54 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/20479: 1.65 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/20479: 1.44 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/20479: 1.59 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/20479: 1.68 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/20479: 1.66 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/20479: 1.66 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/20479: 2.39 ns/op
+load factor: 75.0%
+build_reserved  quadratic_probing_table::HashTable::<u64>/24575: 2.04 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/24575: 1.60 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/24575: 1.66 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/24575: 1.51 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/24575: 1.69 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/24575: 1.86 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/24575: 1.70 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/24575: 1.75 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/24575: 2.84 ns/op
+load factor: 87.5%
+build_reserved  quadratic_probing_table::HashTable::<u64>/28671: 2.53 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/28671: 1.85 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/28671: 1.96 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/28671: 1.53 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/28671: 1.98 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/28671: 2.56 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/28671: 1.99 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/28671: 2.05 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/28671: 3.76 ns/op
+mi: 2^20
+load factor: 25.0%
+build_reserved  quadratic_probing_table::HashTable::<u64>/262143: 2.23 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/262143: 1.86 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/262143: 2.40 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/262143: 1.76 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/262143: 1.88 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/262143: 2.25 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/262143: 1.98 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/262143: 2.26 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/262143: 3.01 ns/op
+load factor: 37.5%
+build_reserved  quadratic_probing_table::HashTable::<u64>/393215: 2.03 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/393215: 1.85 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/393215: 2.24 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/393215: 1.75 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/393215: 1.94 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/393215: 2.17 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/393215: 2.07 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/393215: 2.25 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/393215: 3.00 ns/op
+load factor: 50.0%
+build_reserved  quadratic_probing_table::HashTable::<u64>/524287: 2.14 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/524287: 1.96 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/524287: 2.54 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/524287: 1.82 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/524287: 2.03 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/524287: 2.39 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/524287: 2.09 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/524287: 2.40 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/524287: 3.10 ns/op
+load factor: 62.5%
+build_reserved  quadratic_probing_table::HashTable::<u64>/655359: 2.29 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/655359: 2.12 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/655359: 2.98 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/655359: 2.05 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/655359: 2.20 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/655359: 3.08 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/655359: 2.26 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/655359: 3.08 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/655359: 3.25 ns/op
+load factor: 75.0%
+build_reserved  quadratic_probing_table::HashTable::<u64>/786431: 2.78 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/786431: 2.65 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/786431: 4.31 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/786431: 2.53 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/786431: 2.64 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/786431: 4.26 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/786431: 2.75 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/786431: 4.54 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/786431: 3.69 ns/op
+load factor: 87.5%
+build_reserved  quadratic_probing_table::HashTable::<u64>/917503: 3.87 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/917503: 3.82 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/917503: 5.95 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/917503: 3.87 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/917503: 3.97 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/917503: 7.05 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/917503: 4.09 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/917503: 6.73 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/917503: 4.69 ns/op
+mi: 2^25
+load factor: 25.0%
+build_reserved  quadratic_probing_table::HashTable::<u64>/8388607: 11.77 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/8388607: 7.68 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/8388607: 7.93 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/8388607: 7.51 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/8388607: 7.64 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/8388607: 8.76 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/8388607: 7.90 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/8388607: 8.06 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/8388607: 11.45 ns/op
+load factor: 37.5%
+build_reserved  quadratic_probing_table::HashTable::<u64>/12582911: 7.98 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/12582911: 7.69 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/12582911: 7.76 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/12582911: 7.56 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/12582911: 7.89 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/12582911: 8.69 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/12582911: 8.20 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/12582911: 7.80 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/12582911: 10.84 ns/op
+load factor: 50.0%
+build_reserved  quadratic_probing_table::HashTable::<u64>/16777215: 8.34 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/16777215: 7.51 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/16777215: 8.07 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/16777215: 7.72 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/16777215: 7.85 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/16777215: 8.94 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/16777215: 8.36 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/16777215: 8.05 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/16777215: 11.02 ns/op
+load factor: 62.5%
+build_reserved  quadratic_probing_table::HashTable::<u64>/20971519: 8.57 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/20971519: 7.84 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/20971519: 8.82 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/20971519: 7.87 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/20971519: 8.23 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/20971519: 10.03 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/20971519: 8.49 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/20971519: 8.78 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/20971519: 11.08 ns/op
+load factor: 75.0%
+build_reserved  quadratic_probing_table::HashTable::<u64>/25165823: 8.75 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/25165823: 8.38 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/25165823: 11.03 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/25165823: 8.83 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/25165823: 9.02 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/25165823: 12.35 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/25165823: 8.91 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/25165823: 12.16 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/25165823: 11.75 ns/op
+load factor: 87.5%
+build_reserved  quadratic_probing_table::HashTable::<u64>/29360127: 10.50 ns/op
+build_reserved  aligned_quadratic_probing_table::HashTable::<u64>/29360127: 9.86 ns/op
+build_reserved  direct_simd_quadratic_probing::HashTable::<u64>/29360127: 16.89 ns/op
+build_reserved  aligned_cuckoo_table::HashTable::<u64>/29360127: 10.48 ns/op
+build_reserved  unaligned_cuckoo_table::HashTable::<u64>/29360127: 12.73 ns/op
+build_reserved  direct_simd_cuckoo_table::HashTable::<u64>/29360127: 23.70 ns/op
+build_reserved  linear_probing_table::HashTable::<u64>/29360127: 11.12 ns/op
+build_reserved  direct_simd_linear_probing::HashTable::<u64>/29360127: 22.56 ns/op
+build_reserved  hashbrown::HashMap::<u64,u64>/29360127: 12.68 ns/op

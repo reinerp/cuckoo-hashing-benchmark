@@ -265,6 +265,19 @@ impl<V: Copy> HashTable<V> {
                     }
                 }
 
+                // EARLY-EXIT (favor-first): if the first group has a free slot, insert there and
+                // never load the second group's cache line. Placement is unchanged from the
+                // no-early-exit path (which also fills group0 before group1); this only avoids the
+                // h1 fetch. Build/distinct-key only: skipping the h1 match-scan can duplicate a key
+                // already present in h1, so it is gated behind EARLY_RETURN (incorrect for
+                // insert-or-update semantics).
+                if EARLY_RETURN {
+                    if let Some(insert_slot) = group0.match_empty().lowest_set_bit() {
+                        insertion_probe_length = 1;
+                        break 'search_empty pos0 + insert_slot;
+                    }
+                }
+
                 // Probe second group for a match.
                 insertion_probe_length = 2; // If we reach here, we've probed 2 groups
                 let pos1 = hash1 as usize & self.aligned_bucket_mask;

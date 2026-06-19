@@ -70,6 +70,11 @@ impl<V> HashTable<V> {
         let bucket_mask = self.bucket_mask;
         let hash64 = fold_hash_fast(key, self.seed);
 
+        // EARLY-EXIT (favor-first): insert into the first bucket if it has a free slot, without
+        // loading the second bucket's cache line. Build/distinct-key only (could duplicate a key
+        // already present in the second bucket), hence gated behind EARLY_RETURN.
+        const EARLY_RETURN: bool = true;
+
         let (existing_bucket, existing_mask, stride) = 'existing: loop {
             // Probe first group for a match.
             let pos0 = hash64 as usize & bucket_mask;
@@ -78,6 +83,21 @@ impl<V> HashTable<V> {
             let (mask, stride) = control64::search_mask(key, keys0);
             if mask != 0 {
                 break 'existing (pos0, mask, stride);
+            }
+
+            // Early-exit into the first bucket if it has room (skip the second bucket fetch).
+            if EARLY_RETURN {
+                let (empty_mask, estride) = control64::search_mask(0, keys0);
+                if empty_mask != 0 {
+                    let index = empty_mask.trailing_zeros() as usize / estride;
+                    self.len += 1;
+                    unsafe {
+                        let bucket = self.table.get_unchecked_mut(pos0);
+                        bucket.keys[index] = key;
+                        bucket.values[index].write(value);
+                    }
+                    return (true, (pos0, index), 1);
+                }
             }
 
             // Probe second group for a match.
